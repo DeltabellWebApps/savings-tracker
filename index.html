@@ -473,6 +473,7 @@
     touch-action: none;
   }
   .drag-handle:focus-visible { outline: 2px solid var(--gold); }
+  .goal-name .drag-handle { margin: -6px -4px -6px -10px; flex-shrink: 0; }
   .goal.dragging {
     z-index: 5;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
@@ -566,6 +567,40 @@
   .cat-row .bar-track { height: 6px; margin-bottom: 0; }
   .cat-row.active .cat-head { font-weight: 600; }
 
+  /* Overview stats */
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+  .stat {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    min-width: 0;
+  }
+  .stat .lbl { font-size: 11px; color: var(--ink-soft); }
+  .stat .num { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 500; margin: 2px 0 1px; }
+  .stat .num.negative { color: var(--danger); }
+  .stat .meta { font-size: 10.5px; color: var(--ink-soft); }
+  /* Where the money goes: bills, goals and budgets as one stacked bar; the empty track is what's free. */
+  .split { --s-bills: #4F62C4; --s-goals: #B8863B; --s-budgets: #A04E8C; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .split { --s-bills: #6A80E0; --s-goals: #B88A44; --s-budgets: #C95C8C; }
+  }
+  :root[data-theme="dark"] .split { --s-bills: #6A80E0; --s-goals: #B88A44; --s-budgets: #C95C8C; }
+  .split-bar { display: flex; gap: 2px; height: 14px; border-radius: 5px; overflow: hidden; background: var(--line); margin: 14px 0 6px; }
+  .split-bar .seg { height: 100%; cursor: pointer; }
+  .split-bar .seg:first-child { border-radius: 4px 0 0 4px; }
+  .split-bar .seg:last-child { border-radius: 0 4px 4px 0; }
+  .split-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12.5px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .split-row:last-child { border-bottom: none; }
+  .split-row .amt { color: var(--ink-soft); white-space: nowrap; }
+  .split-row .amt b { color: var(--ink); font-weight: 500; }
+  .split-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+  .split-key.free { background: var(--line); }
+  /* A bar with a tick for how far through the pay period today is. */
+  .pace { position: relative; }
+  .pace .bar-track { margin-bottom: 0; }
+  .pace-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); border-radius: 1px; }
+
   /* Sign-in */
   .auth-divider { text-align: center; font-size: 11px; color: var(--ink-soft); margin: 4px 0 10px; }
   .auth-notice { font-size: 12.5px; line-height: 1.5; color: var(--ink); background: var(--paper-raised); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; display: none; }
@@ -607,6 +642,7 @@
     <p class="sub">What you're saving for, and how far you've come.</p>
 
     <div class="totals" id="totals"></div>
+    <input class="search-input" id="goalSearch" type="search" placeholder="Search goals" autocomplete="off" style="display:none;">
     <div class="chip-row" id="categoryChips"></div>
     <div class="goal-list" id="goalList"></div>
 
@@ -631,6 +667,7 @@
     <p class="sub">What you allow yourself each month, and what's gone.</p>
 
     <div class="totals" id="budgetTotals"></div>
+    <input class="search-input" id="budgetSearch" type="search" placeholder="Search budgets" autocomplete="off" style="display:none;">
     <div class="goal-list" id="budgetList"></div>
 
     <button class="add-goal-btn" id="openAddBudget">+ New budget</button>
@@ -907,13 +944,15 @@
   let authMode = 'signin';
   let bills = [];         // bills and income sources, told apart by .kind
   let payments = [];
-  let periodDeposits = []; // deposits made this pay period; £0 ones mark a goal as skipped
+  let allDeposits = [];    // every goal's deposits; £0 ones mark a goal as skipped for that period
   let paidIndex = new Map(); // "billId|YYYY-MM-DD" -> payment
   let editingBillId = null;
   let editingBillKind = 'bill';
   let historyBillId = null;
   let activeBillCategory = 'All';
   let billQuery = '';
+  let goalQuery = '';
+  let budgetQuery = '';
   let budgets = [];
   let periodSpends = [];   // spends dated within this pay period
   let editingBudgetId = null;
@@ -994,13 +1033,13 @@
     return data.map(fromDepositRow);
   }
 
-  async function loadPeriodDeposits() {
+  async function loadAllDeposits() {
     try {
-      const { data, error } = await sb.from('deposits').select('*').gte('created_at', currentPayPeriod().start.toISOString());
+      const { data, error } = await sb.from('deposits').select('*').order('created_at', { ascending: true });
       if (error) throw error;
-      periodDeposits = data.map(fromDepositRow);
+      allDeposits = data.map(fromDepositRow);
     } catch (e) {
-      periodDeposits = [];
+      allDeposits = [];
     }
   }
 
@@ -1266,7 +1305,7 @@
 
   // See LedgerCore.goalPlan for what the plan holds.
   function goalPlan(goal) {
-    return LedgerCore.goalPlan(goal, periodDeposits);
+    return LedgerCore.goalPlan(goal, allDeposits);
   }
 
   // What a budget has used this pay period. `committed` is what the Overview sets aside: the allowance, or more if overspent.
@@ -1336,6 +1375,33 @@
     return active;
   }
 
+  // ---------- Search ----------
+  // Goals, bills and budgets each get a search box once the list is longer than this (or while a search is typed).
+  const SEARCH_FROM = 6;
+
+  function bindSearch(inputId, onQuery) {
+    const input = document.getElementById(inputId);
+    input.addEventListener('input', () => { onQuery(input.value.trim().toLowerCase()); render(); });
+    return input;
+  }
+
+  function showSearch(input, count, query) {
+    input.style.display = count > SEARCH_FROM || query ? 'block' : 'none';
+  }
+
+  function matchesQuery(query, ...fields) {
+    return !query || fields.some(f => f && f.toLowerCase().includes(query));
+  }
+
+  const goalSearch = bindSearch('goalSearch', q => { goalQuery = q; });
+  const billSearch = bindSearch('billSearch', q => { billQuery = q; });
+  const budgetSearch = bindSearch('budgetSearch', q => { budgetQuery = q; });
+
+  // "No goals match "x"." (or "in this category" when only the chip is filtering).
+  function noMatchHtml(noun, input, query) {
+    return `<div class="empty">No ${noun} ${query ? `match "${escapeHtml(input.value.trim())}"` : 'in this category'}.</div>`;
+  }
+
   // ---------- Main render ----------
   function render() {
     indexPayments();
@@ -1351,6 +1417,7 @@
     activeCategory = renderChips('categoryChips', cats, activeCategory, c => { activeCategory = c; });
     const list = document.getElementById('goalList');
     const totalsEl = document.getElementById('totals');
+    showSearch(goalSearch, live.length, goalQuery);
 
     renderArchive('goalArchive', 'goals', goals.filter(g => g.archived).map(g => ({
       id: g.id, name: g.name, meta: g.category || 'Goal', amount: `${formatMoney(g.saved)} of ${formatMoney(g.target)}`
@@ -1376,10 +1443,11 @@
       </div>
     `;
 
-    const displayed = activeCategory === 'All' ? live : live.filter(g => g.category === activeCategory);
+    const displayed = live.filter(g =>
+      (activeCategory === 'All' || g.category === activeCategory) && matchesQuery(goalQuery, g.name, g.category));
 
     if (displayed.length === 0) {
-      list.innerHTML = '<div class="empty">No goals in this category.</div>';
+      list.innerHTML = noMatchHtml('goals', goalSearch, goalQuery);
       return;
     }
 
@@ -1405,9 +1473,8 @@
       return `
         <div class="goal ${done ? 'done' : ''}" data-id="${g.id}">
           <div class="goal-head">
-            <div class="goal-name">${done ? '✓' : ''} ${escapeHtml(g.name)}</div>
+            <div class="goal-name">${handleHtml}<span>${done ? '✓ ' : ''}${escapeHtml(g.name)}</span></div>
             <div class="goal-head-actions">
-              ${handleHtml}
               <button class="btn-icon edit-goal" data-id="${g.id}">edit</button>
             </div>
           </div>
@@ -1468,7 +1535,7 @@
     if (!ok) return;
     btn.disabled = true;
     try {
-      periodDeposits.push(await createDepositRemote(g.id, 0, 'Skipped this month'));
+      allDeposits.push(await createDepositRemote(g.id, 0, 'Skipped this month'));
       render();
       showToast(`Skipped ${g.name} this month`);
     } catch (e) {
@@ -1481,7 +1548,7 @@
     btn.disabled = true;
     try {
       await deleteDepositRemote(btn.dataset.id);
-      periodDeposits = periodDeposits.filter(d => d.id !== btn.dataset.id);
+      allDeposits = allDeposits.filter(d => d.id !== btn.dataset.id);
       render();
       showToast('Skip undone');
     } catch (e) {
@@ -1541,7 +1608,7 @@
     handle.addEventListener('pointercancel', onUp);
   }
 
-  // Moves displayed[from] to position `to`. With a category filter on, the filtered goals swap among the
+  // Moves displayed[from] to position `to`. With a category filter or search on, the shown goals swap among the
   // places they already hold in the full order, so goals outside the filter don't move.
   async function reorderGoals(displayed, from, to) {
     const ids = displayed.map(g => g.id);
@@ -1670,7 +1737,7 @@
     try {
       await deleteGoalRemote(idToDelete);
       goals = goals.filter(g => g.id !== idToDelete);
-      periodDeposits = periodDeposits.filter(d => d.goalId !== idToDelete);
+      allDeposits = allDeposits.filter(d => d.goalId !== idToDelete);
       render();
       closeGoalSheet();
       showToast('Goal deleted');
@@ -1734,11 +1801,11 @@
       if (editingDepositId) {
         await updateDepositRemote(editingDepositId, { amount, note: note || null });
         g.saved += amount - editingDepositOriginalAmount;
-        const inPeriod = periodDeposits.find(d => d.id === editingDepositId);
-        if (inPeriod) inPeriod.amount = amount; // a skip given an amount becomes a normal deposit
+        const known = allDeposits.find(d => d.id === editingDepositId);
+        if (known) Object.assign(known, { amount, note }); // a skip given an amount becomes a normal deposit
         showToast('Entry updated');
       } else {
-        periodDeposits.push(await createDepositRemote(g.id, amount, note));
+        allDeposits.push(await createDepositRemote(g.id, amount, note));
         g.saved += amount;
         showToast(`${amount > 0 ? 'Added' : 'Adjusted'} ${formatMoney(amount)} — ${g.name}`);
       }
@@ -1758,7 +1825,7 @@
     try {
       await deleteDepositRemote(editingDepositId);
       g.saved -= editingDepositOriginalAmount;
-      periodDeposits = periodDeposits.filter(d => d.id !== editingDepositId);
+      allDeposits = allDeposits.filter(d => d.id !== editingDepositId);
       render();
       closeDepositSheet();
       showToast('Entry deleted');
@@ -1832,8 +1899,6 @@
 
   // ---------- Bills render ----------
   const UNCATEGORISED = 'Uncategorised';
-  const billSearch = document.getElementById('billSearch');
-  billSearch.addEventListener('input', () => { billQuery = billSearch.value.trim().toLowerCase(); renderBills(); });
 
   function renderBills() {
     const list = document.getElementById('billList');
@@ -1849,7 +1914,7 @@
 
     const cats = Array.from(new Set(billsOnly.map(b => b.category).filter(Boolean)));
     activeBillCategory = renderChips('billChips', cats, activeBillCategory, c => { activeBillCategory = c; });
-    billSearch.style.display = billsOnly.length > 6 || billQuery ? 'block' : 'none';
+    showSearch(billSearch, billsOnly.length, billQuery);
 
     if (billsOnly.length === 0) {
       list.innerHTML = '<div class="empty"><div class="big">No bills yet</div>Tap "New bill" to add your regular outgoings.</div>';
@@ -1859,7 +1924,7 @@
 
     const shown = billsOnly.filter(b =>
       (activeBillCategory === 'All' || b.category === activeBillCategory) &&
-      (!billQuery || b.name.toLowerCase().includes(billQuery) || b.category.toLowerCase().includes(billQuery)));
+      matchesQuery(billQuery, b.name, b.category));
 
     const today = startOfToday();
     const horizon = addDays(today, 30);
@@ -1879,7 +1944,7 @@
     `;
 
     if (shown.length === 0) {
-      list.innerHTML = `<div class="empty">No bills match${billQuery ? ` "${escapeHtml(billSearch.value.trim())}"` : ''}.</div>`;
+      list.innerHTML = noMatchHtml('bills', billSearch, billQuery);
       return;
     }
 
@@ -2130,6 +2195,29 @@
       budgetsSpent += use.spent;
     });
     const setAside = goalsMonthly + budgetsCommitted;
+    const income = (pay ? pay.amount : 0) + otherTotal;
+    const free = leftOver - setAside;
+
+    // ---------- Headline stats ----------
+    const daysLeft = Math.max(1, Math.round((period.nextPayday - today) / 86400000));
+    const live = liveGoals();
+    const totalSaved = live.reduce((s, g) => s + g.saved, 0);
+    const totalTarget = live.reduce((s, g) => s + g.target, 0);
+    const stat = (lbl, num, meta, negative) =>
+      `<div class="stat"><div class="lbl">${lbl}</div><div class="num ${negative ? 'negative' : ''}">${num}</div><div class="meta">${meta}</div></div>`;
+    html += `<div class="stat-grid">
+      ${pay
+        ? stat('Free per day', formatMoney(free / daysLeft), `${formatMoney(free)} until payday`, free < 0)
+        : stat('Free per day', '—', 'enter pay to see this')}
+      ${stat('Payday in', `${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
+        period.nextPayday.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))}
+      ${income > 0
+        ? stat('Saving rate', `${Math.round((goalsMonthly / income) * 100)}%`, `of income going to goals`)
+        : stat('Saving rate', '—', 'enter pay to see this')}
+      ${live.length
+        ? stat('Saved in goals', formatMoney(totalSaved), `${Math.round(Math.min(1, totalSaved / totalTarget) * 100)}% of ${formatMoney(totalTarget)}`)
+        : stat('Saved in goals', formatMoney(0), 'no goals yet')}
+    </div>`;
 
     html += `
       <h3 class="section-title" style="margin-top: 0;">Pay period <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${periodLabel}</span></h3>
@@ -2169,10 +2257,45 @@
         ${setAside > 0 ? `
         <div class="statement-row total">
           <div>Free to spend</div>
-          <div class="amt ${neg(leftOver - setAside)}">${formatMoney(leftOver - setAside)}</div>
+          <div class="amt ${neg(free)}">${formatMoney(free)}</div>
         </div>` : ''}
       </div>
     `;
+
+    // ---------- Where the money goes ----------
+    // This period's income split into bills, goals and budgets; the unfilled part of the bar is what's free.
+    const parts = [
+      { key: 'bills', name: 'Bills', value: periodBillsTotal },
+      { key: 'goals', name: 'Goals', value: goalsMonthly },
+      { key: 'budgets', name: 'Budgets', value: budgetsCommitted }
+    ].filter(p => p.value > 0);
+    const outgoing = parts.reduce((s, p) => s + p.value, 0);
+    let splitTips = [];
+    if (income > 0 && outgoing > 0) {
+      const whole = Math.max(income, outgoing);
+      const share = v => `${Math.round((v / income) * 100)}%`;
+      const tip = p => `<div class="tip-title">${p.name}</div>
+        <div class="tip-row"><span>This period</span><b>${formatMoney(p.value)}</b></div>
+        <div class="tip-row"><span>Of income</span><b>${share(p.value)}</b></div>`;
+      html += `
+        <h3 class="section-title">Where it goes <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">of ${formatMoney(income)} coming in</span></h3>
+        <div class="statement split chart" style="padding-bottom: 4px;">
+          <div class="split-bar" role="img" aria-label="${parts.map(p => `${p.name} ${share(p.value)}`).join(', ')}, free ${share(Math.max(0, free))}">
+            ${parts.map((p, i) => `<div class="seg" data-i="${i}" style="width:${(p.value / whole) * 100}%; background: var(--s-${p.key});"></div>`).join('')}
+          </div>
+          ${parts.map(p => `
+            <div class="split-row">
+              <span><span class="split-key" style="background: var(--s-${p.key});"></span>${p.name}</span>
+              <span class="amt"><b>${formatMoney(p.value)}</b> · ${share(p.value)}</span>
+            </div>`).join('')}
+          <div class="split-row">
+            <span><span class="split-key free"></span>${free < 0 ? 'Over by' : 'Free'}</span>
+            <span class="amt"><b ${free < 0 ? 'style="color: var(--danger)"' : ''}>${formatMoney(Math.abs(free))}</b>${free < 0 ? '' : ` · ${share(free)}`}</span>
+          </div>
+        </div>
+      `;
+      splitTips = parts.map(tip);
+    }
 
     // ---------- Bills in this period ----------
     let periodPaid = 0, periodTotal = 0, periodOverdue = 0;
@@ -2196,6 +2319,33 @@
           <div class="month-head"><span>${formatMoney(periodPaid)} paid</span><span class="amt">of ${formatMoney(periodTotal)}</span></div>
           <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
           <div class="bill-due" style="padding-bottom: 14px;">${note}</div>
+        </div>
+      `;
+    }
+
+    // ---------- Budget pace ----------
+    // Spending across all budgets against an even spread over the pay period; the tick marks today.
+    const budgetTotal = liveBudgets().reduce((s, b) => s + b.amount, 0);
+    if (budgetTotal > 0) {
+      const periodDays = Math.round((period.nextPayday - period.start) / 86400000);
+      const dayNum = Math.round((today - period.start) / 86400000) + 1;
+      const evenPace = budgetTotal * (dayNum / periodDays);
+      const diff = budgetsSpent - evenPace;
+      const pct = Math.min(100, Math.max(0, (budgetsSpent / budgetTotal) * 100));
+      let note;
+      if (budgetsSpent > budgetTotal) note = `<span style="color: var(--danger)">${formatMoney(budgetsSpent - budgetTotal)} over your budgets.</span>`;
+      else if (diff > Math.max(1, budgetTotal * 0.05)) note = `<span style="color: var(--danger)">${formatMoney(diff)} ahead of an even pace.</span>`;
+      else if (diff < -Math.max(1, budgetTotal * 0.05)) note = `${formatMoney(-diff)} under an even pace.`;
+      else note = 'Right on an even pace.';
+      html += `
+        <h3 class="section-title">Budget pace</h3>
+        <div class="statement">
+          <div class="month-head"><span>${formatMoney(budgetsSpent)} spent</span><span class="amt">of ${formatMoney(budgetTotal)}</span></div>
+          <div class="pace">
+            <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+            <div class="pace-mark" style="left: calc(${(dayNum / periodDays) * 100}% - 1px);" title="Today"></div>
+          </div>
+          <div class="bill-due" style="padding: 10px 0 14px;">${note} The tick is today, day ${dayNum} of ${periodDays}.</div>
         </div>
       `;
     }
@@ -2225,6 +2375,24 @@
         `;
       }).join('');
     html += '</div>';
+
+    // ---------- Savings over time ----------
+    // Running total across current goals. Anything saved before deposits were recorded is the starting point.
+    const liveIds = new Set(live.map(g => g.id));
+    const goalDeposits = allDeposits.filter(d => d.amount !== 0 && liveIds.has(d.goalId))
+      .sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
+    const goalName = new Map(live.map(g => [g.id, g.name]));
+    let running = totalSaved - goalDeposits.reduce((s, d) => s + d.amount, 0);
+    const savingsPoints = goalDeposits.map(d => {
+      running += d.amount;
+      return { x: new Date(d.createdAt), y: running, tip: `<div class="tip-title">${formatDate(d.createdAt)}</div>
+        <div class="tip-row"><span>${escapeHtml(goalName.get(d.goalId))}</span><b>${d.amount > 0 ? '+' : '−'}${formatMoney(Math.abs(d.amount))}</b></div>
+        <div class="tip-row"><span>All goals</span><b>${formatMoney(running)}</b></div>` };
+    });
+    if (savingsPoints.length >= 2) {
+      html += `<h3 class="section-title">Savings over time <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">all current goals</span></h3>
+        <div class="statement chart-box"><div class="chart" id="savingsChart"></div></div>`;
+    }
 
     // ---------- Previous pay ----------
     const pastPay = bills.filter(b => isPay(b) && b.startDate < paydayISO)
@@ -2270,6 +2438,21 @@
     html += '<button class="add-goal-btn" id="openAddIncome" style="margin-top: 0;">+ Add other income</button>';
 
     el.innerHTML = html;
+    el.querySelectorAll('.split-bar .seg').forEach(seg => {
+      const show = () => {
+        const r = seg.getBoundingClientRect();
+        showTip(splitTips[seg.dataset.i], r.left + r.width / 2, r.top);
+      };
+      seg.addEventListener('pointerenter', show);
+      seg.addEventListener('pointerdown', show);
+      seg.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideTip(); });
+    });
+    if (savingsPoints.length >= 2) {
+      mountChart(document.getElementById('savingsChart'), {
+        kind: 'line', points: savingsPoints, target: totalTarget, height: 150,
+        label: `Saved across all goals over time, now ${formatMoney(totalSaved)} of ${formatMoney(totalTarget)}`
+      });
+    }
     if (payHistory.length >= 2) {
       mountChart(document.getElementById('payChart'), {
         kind: 'columns', height: 140,
@@ -2533,6 +2716,7 @@
     const list = document.getElementById('budgetList');
     const totalsEl = document.getElementById('budgetTotals');
     const live = liveBudgets();
+    showSearch(budgetSearch, live.length, budgetQuery);
 
     renderArchive('budgetArchive', 'budgets', budgets.filter(b => b.archived).map(b => ({
       id: b.id, name: b.name, meta: 'Budget', amount: `${formatMoney(b.amount)}/mo`
@@ -2560,7 +2744,13 @@
       </div>
     `;
 
-    list.innerHTML = live.map(b => {
+    const shown = live.filter(b => matchesQuery(budgetQuery, b.name));
+    if (shown.length === 0) {
+      list.innerHTML = noMatchHtml('budgets', budgetSearch, budgetQuery);
+      return;
+    }
+
+    list.innerHTML = shown.map(b => {
       const use = budgetUse(b);
       const pct = Math.min(100, Math.max(0, (use.spent / b.amount) * 100));
       const line = use.over
@@ -3073,7 +3263,7 @@
     document.getElementById('billList').innerHTML = '<div class="empty">Loading your bills…</div>';
     document.getElementById('budgetList').innerHTML = '<div class="empty">Loading your budgets…</div>';
     document.getElementById('overviewContent').innerHTML = '<div class="empty">Loading…</div>';
-    await Promise.all([loadGoals(), loadBills(), loadPayments(), loadPeriodDeposits(), loadBudgets(), loadPeriodSpends()]);
+    await Promise.all([loadGoals(), loadBills(), loadPayments(), loadAllDeposits(), loadBudgets(), loadPeriodSpends()]);
     render();
   }
 
@@ -3087,7 +3277,7 @@
     goals = [];
     bills = [];
     payments = [];
-    periodDeposits = [];
+    allDeposits = [];
     budgets = [];
     periodSpends = [];
   }

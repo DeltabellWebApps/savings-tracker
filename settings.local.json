@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git fetch; git status -sb; git log --oneline -3 origin/main; \\(Get-Content index.html | Measure-Object -Line\\).Lines; \\(Get-Content ledger-core.js | Measure-Object -Line\\).Lines; ls)"
+    ]
+  }
+}
