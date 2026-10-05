@@ -1,8 +1,7 @@
 # Ledger
 
 A personal money tracker: savings goals, regular bills, monthly budgets, and what's left over each pay period.
-It's a single static page backed by [Supabase](https://supabase.com) (auth and Postgres), with an optional
-iOS home-screen widget built on [Scriptable](https://scriptable.app).
+It's a single static page backed by [Supabase](https://supabase.com) (auth and Postgres).
 
 Live at <https://deltabellwebapps.github.io/savings-tracker/>.
 
@@ -11,8 +10,7 @@ Live at <https://deltabellwebapps.github.io/savings-tracker/>.
 | Path | What it is |
 |---|---|
 | `index.html` | The whole web app: markup, styles and script. Four tabs: Overview, Goals, Bills, Budgets. |
-| `ledger-core.js` | Rules shared by the app and the widget: dates, bill schedules, the pay period, money formatting, goal plans and projections. |
-| `widget/ledger-widget.js` | The Scriptable widget (goals, bills, or both; Home Screen and Lock Screen sizes). |
+| `ledger-core.js` | The app's core rules: dates, bill schedules, the pay period, money formatting, goal plans and projections. The app needs it to load. |
 | `supabase/` | SQL migrations, run by hand in the Supabase SQL editor. |
 
 There's no build step. GitHub Pages serves the files as they are.
@@ -73,7 +71,7 @@ Magic links need the app's address allowed as a redirect:
 - **Redirect URLs:** add the same URL. To test locally, also add e.g. `http://localhost:8000/`.
 
 The link opens the app and signs you in on whichever device you open it on. Use "Sign up" to get a link
-that also creates the account. The Scriptable widget still signs in with a password.
+that also creates the account.
 
 ## Running locally
 
@@ -84,21 +82,3 @@ npx serve .            # or: python -m http.server 8000
 ```
 
 It talks to the live Supabase project, so you're working with real data.
-
-## The widget
-
-1. Install Scriptable on the iPhone.
-2. Copy **both** `widget/ledger-widget.js` and `ledger-core.js` into Scriptable's folder
-   (iCloud Drive → Scriptable). The widget imports the shared rules with `importModule('ledger-core')`.
-   If you change `ledger-core.js`, copy it across again.
-3. Run *ledger-widget* once in the Scriptable app to sign in. Only the session token is kept, in the keychain.
-4. Add a Scriptable widget to the Home or Lock Screen, pick the script, and set **Parameter** to
-   `goals`, `bills` or `both`.
-
-It refreshes about every 15 minutes and shows the last copy it fetched when it's offline.
-
-## Changing the shared rules
-
-Anything about dates, schedules, the pay period, money formatting or goal plans belongs in `ledger-core.js`.
-The web app reads it as `window.LedgerCore` and the widget as a Scriptable module, so one edit covers both.
-Only after copying the new file to Scriptable does the widget pick it up.
