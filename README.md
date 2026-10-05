@@ -29,6 +29,13 @@ There's no build step. GitHub Pages serves the files as they are.
 - **Budgets** are monthly allowances (e.g. Groceries £300). They reset each payday, and spends are logged against them.
 - **Overview.** Pay + other income − bills = *left over*. Then subtract goals and budgets (each one's plan, or
   more if you've gone over it) to get *free to spend*.
+- **Bank balance.** You enter your current account balance by hand (a second update on the same day replaces
+  that day's). The Overview carries it forward to the day before payday: bills still to come out, income still to
+  come in, what's left to save for goals this month, and what's left in budgets (spread evenly over the days left).
+  It assumes goal money goes to a separate savings account. Anything marked paid, saved or spent after you
+  entered the balance comes off too. It also shows the lowest point before payday, warns if you'd go overdrawn,
+  and suggests how much you could move to a goal (one that's behind schedule first) without going below £0.
+  The rules are in `balanceOutlook()` in `index.html` and `balanceForecast()` in `ledger-core.js`.
 - **Archiving** hides a goal, bill, income source or budget from every list, total and chart without
   deleting its history. You can restore it from the "Archived" list at the bottom of its tab.
 
@@ -47,6 +54,7 @@ Row-level security limits each user to their own rows.
 | `bill_payments` | `bill_id`, `due_date`, `amount`, `paid_at` | One row per occurrence marked paid. |
 | `budgets` | `name`, `amount`, `sort_order`, `archived` | Added in migration 001. |
 | `spends` | `budget_id`, `amount`, `note`, `spent_on` | Added in migration 001. Negative = refund. |
+| `balances` | `amount` | Added in migration 002. One row per balance update; the newest is the current one. Negative = overdrawn. |
 
 The first four tables were created in the Supabase dashboard. Their columns are listed above as the app uses them.
 
@@ -61,6 +69,7 @@ Deploy the matching app code only *after* running the migration.
   - creates `budgets` and `spends`
 
   The file also has an optional query that checks whether any goal's total has drifted from its deposit history.
+- `002_balances.sql` creates `balances` for the bank balance on the Overview.
 
 ### Auth (email + password, and magic links)
 

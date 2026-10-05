@@ -443,6 +443,9 @@
   .statement-row .meta { display: block; font-size: 11px; color: var(--ink-soft); font-weight: 400; margin-top: 2px; }
   .statement-row .row-end { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
   .statement-empty { padding: 16px 0; font-size: 12.5px; color: var(--ink-soft); text-align: center; }
+  .balance-note { font-size: 11.5px; color: var(--ink-soft); padding: 11px 0; border-bottom: 1px solid var(--line); }
+  .balance-note:last-child { border-bottom: none; }
+  .balance-note.warn { color: var(--danger); font-weight: 500; }
   .section-title {
     font-family: 'Fraunces', serif;
     font-size: 17px;
@@ -902,6 +905,22 @@
   </div>
 </div>
 
+<!-- Bank Balance Sheet -->
+<div class="overlay" id="balanceOverlay">
+  <div class="sheet">
+    <h2>Bank balance</h2>
+    <div class="field">
+      <label for="balanceAmountInput">Current account balance now</label>
+      <input id="balanceAmountInput" type="number" inputmode="decimal" placeholder="0" step="0.01">
+      <div class="field-hint" id="balanceHint"></div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="cancelBalance">Cancel</button>
+      <button class="btn-primary" id="saveBalance">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- History Sheet -->
 <div class="overlay" id="historyOverlay">
   <div class="sheet">
@@ -959,11 +978,12 @@
   let spendBudgetId = null;
   let editingSpendId = null;
   let spendHistoryBudgetId = null;
+  let balances = [];       // current account balances as entered, oldest first
   const showArchived = { goals: false, bills: false, budgets: false };
 
   const {
     FREQUENCY_LABELS, parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth,
-    occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage, currentPayPeriod, formatMoney
+    occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage, currentPayPeriod, balanceForecast, formatMoney
   } = LedgerCore;
 
   // ---------- Mapping ----------
@@ -1192,6 +1212,21 @@
     return data.map(fromSpendRow);
   }
 
+  // ---------- Balances CRUD ----------
+  function fromBalanceRow(row) {
+    return { id: row.id, amount: Number(row.amount), createdAt: row.created_at };
+  }
+
+  async function loadBalances() {
+    try {
+      const { data, error } = await sb.from('balances').select('*').order('created_at', { ascending: true });
+      if (error) throw error;
+      balances = data.map(fromBalanceRow);
+    } catch (e) {
+      balances = [];
+    }
+  }
+
   async function saveRow(table, id, fields) {
     if (id) {
       const { error } = await sb.from(table).update(fields).eq('id', id);
@@ -1312,6 +1347,63 @@
   function budgetUse(budget) {
     const spent = periodSpends.filter(s => s.budgetId === budget.id).reduce((t, s) => t + s.amount, 0);
     return { spent, left: budget.amount - spent, over: spent > budget.amount, committed: Math.max(budget.amount, spent) };
+  }
+
+  // Carries a balance entered this pay period forward to the day before payday. Goal money goes to a separate
+  // savings account, so deposits leave the current account. What counts as already in the balance:
+  //   bills    — due before the day it was entered and marked paid, or marked paid before it was entered;
+  //              unpaid overdue ones come out today
+  //   income   — dated on or before the day it was entered
+  //   deposits — made before it was entered
+  //   spends   — logged before it was entered, or dated before that day
+  // What's still to save this month comes out today; what's left in budgets is spread evenly to payday.
+  function balanceOutlook(entry, period) {
+    const at = new Date(entry.createdAt);
+    const atDay = new Date(at.getFullYear(), at.getMonth(), at.getDate());
+    const today = startOfToday();
+    const dayOf = iso => { const d = new Date(iso); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+    const events = [];
+    const add = (kind, date, amount) => events.push({ kind, date, amount });
+
+    bills.filter(b => !b.archived).forEach(b => {
+      occurrencesBetween(b, period.start, period.end).forEach(d => {
+        if (b.kind === 'income') {
+          if (d > atDay) add('income', d, b.amount);
+          return;
+        }
+        const p = paymentFor(b, d);
+        if (p && new Date(p.paidAt) > at && d >= atDay) add('bills', dayOf(p.paidAt), -p.amount);
+        else if (!p && d >= trackFrom(b)) add('bills', d < today ? today : d, -b.amount);
+      });
+    });
+    allDeposits.filter(d => new Date(d.createdAt) > at).forEach(d => add('goals', dayOf(d.createdAt), -d.amount));
+    liveGoals().forEach(g => {
+      const plan = goalPlan(g);
+      const toSave = plan.skip ? 0 : Math.max(0, plan.planned - Math.max(0, plan.savedThisPeriod));
+      if (toSave > 0) add('goals', today, -toSave);
+    });
+    periodSpends.filter(s => new Date(s.createdAt) > at && parseLocalDate(s.spentOn) >= atDay)
+      .forEach(s => add('budgets', parseLocalDate(s.spentOn), -s.amount));
+    const budgetLeft = liveBudgets().reduce((s, b) => s + Math.max(0, budgetUse(b).left), 0);
+
+    const total = (kind, ahead) => events
+      .filter(e => (!kind || e.kind === kind) && (e.date >= today) === ahead)
+      .reduce((s, e) => s + e.amount, 0);
+    return {
+      forecast: balanceForecast(entry.amount, events, -budgetLeft, period.end),
+      since: total(null, false),
+      bills: total('bills', true),
+      income: total('income', true),
+      goals: total('goals', true),
+      budgets: total('budgets', true) - budgetLeft
+    };
+  }
+
+  // "today", "yesterday", "3 days ago"
+  function daysAgo(iso) {
+    const d = new Date(iso);
+    const days = Math.round((startOfToday() - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+    return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
   }
 
   const liveGoals = () => goals.filter(g => !g.archived);
@@ -2219,8 +2311,83 @@
         : stat('Saved in goals', formatMoney(0), 'no goals yet')}
     </div>`;
 
+    // ---------- Bank balance ----------
+    const latestBalance = balances[balances.length - 1] || null;
+    const paydayShort = period.nextPayday.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    html += `<h3 class="section-title" style="margin-top: 0;">Bank balance <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">current account</span></h3><div class="statement">`;
+    if (!latestBalance) {
+      html += `
+        <div class="statement-row">
+          <div>Current account<span class="meta">add your balance to see where you'll be on payday</span></div>
+          <div class="row-end"><button class="btn-small update-balance">Add balance</button></div>
+        </div>`;
+    } else {
+      const enteredAt = new Date(latestBalance.createdAt);
+      html += `
+        <div class="statement-row">
+          <div>Balance<span class="meta">entered ${daysAgo(latestBalance.createdAt)} · ${shortDate(enteredAt)}</span></div>
+          <div class="row-end">
+            <div class="amt ${neg(latestBalance.amount)}">${formatMoney(latestBalance.amount)}</div>
+            <button class="btn-icon update-balance">update</button>
+          </div>
+        </div>`;
+      if (enteredAt < period.start) {
+        html += `<div class="balance-note">This was entered before payday, so it can't be used for this pay period. Update it to see where you'll be on ${paydayShort}.</div>`;
+      } else {
+        const out = balanceOutlook(latestBalance, period);
+        const fc = out.forecast;
+        const row = (name, meta, amount) => Math.abs(amount) < 0.005 ? '' : `
+          <div class="statement-row">
+            <div>${name}<span class="meta">${meta}</span></div>
+            <div class="amt">${amount > 0 ? '+' : '−'}${formatMoney(Math.abs(amount))}</div>
+          </div>`;
+        if (Math.abs(out.since) >= 0.005) {
+          html += row('Since then', 'bills, savings and spends logged after you entered it', out.since) + `
+            <div class="statement-row total">
+              <div>Estimated now</div>
+              <div class="amt ${neg(fc.now)}">${formatMoney(fc.now)}</div>
+            </div>`;
+        }
+        html += row('Bills', 'still to come out', out.bills)
+          + row('Income', 'still to come in', out.income)
+          + row('Goals', 'still to save this month', out.goals)
+          + row('Budgets', 'left to spend', out.budgets) + `
+          <div class="statement-row total">
+            <div>Before payday<span class="meta">${shortDate(period.end)}, the day before pay</span></div>
+            <div class="amt ${neg(fc.end)}">${formatMoney(fc.end)}</div>
+          </div>`;
+
+        const dayName = d => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+        const lowWhen = dayName(fc.lowDate);
+        if (fc.overdrawnDate) {
+          html += `<div class="balance-note warn">Goes overdrawn on ${dayName(fc.overdrawnDate)}, down to ${formatMoney(fc.low)} by ${lowWhen}.</div>`;
+        } else if (fc.lowDate < period.end) {
+          html += `<div class="balance-note">Lowest point ${formatMoney(fc.low)} on ${lowWhen}.</div>`;
+        }
+
+        // Room to save: what could go to a goal now without the balance dropping below £0 before payday.
+        // A goal that's behind schedule comes first; otherwise the first unfinished goal.
+        const spare = Math.floor(fc.low);
+        const open = liveGoals().filter(g => !LedgerCore.isDone(g));
+        if (spare >= 10 && open.length) {
+          const behind = open.map(g => ({ g, p: goalPlan(g).projection })).find(x => x.p && x.p.behindBy);
+          const g = behind ? behind.g : open[0];
+          const amount = Math.max(1, Math.floor(Math.min(spare, behind ? behind.p.behindBy : g.target - g.saved)));
+          const why = behind
+            ? `${escapeHtml(g.name)} is ${formatMoney(behind.p.behindBy)} behind schedule.`
+            : `You could put it towards ${escapeHtml(g.name)}.`;
+          html += `
+            <div class="statement-row">
+              <div>Room to save ${formatMoney(amount)}<span class="meta">${why} You'd stay above £0 until payday.</span></div>
+              <div class="row-end"><button class="btn-small balance-to-goal" data-id="${g.id}" data-amount="${amount}">Add</button></div>
+            </div>`;
+        }
+      }
+    }
+    html += '</div>';
+
     html += `
-      <h3 class="section-title" style="margin-top: 0;">Pay period <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${periodLabel}</span></h3>
+      <h3 class="section-title">Pay period <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${periodLabel}</span></h3>
       <div class="statement">
         <div class="statement-row">
           <div>Pay<span class="meta">${pay ? '' : 'not entered yet · '}paid ${shortDate(period.start)}</span></div>
@@ -2394,6 +2561,16 @@
         <div class="statement chart-box"><div class="chart" id="savingsChart"></div></div>`;
     }
 
+    // ---------- Balance over time ----------
+    const balancePoints = balances.map(b => ({
+      x: new Date(b.createdAt), y: b.amount,
+      tip: `<div class="tip-title">${formatDate(b.createdAt)}</div><div class="tip-row"><span>Balance</span><b>${formatMoney(b.amount)}</b></div>`
+    }));
+    if (balancePoints.length >= 2) {
+      html += `<h3 class="section-title">Balance over time <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">as entered</span></h3>
+        <div class="statement chart-box"><div class="chart" id="balanceChart"></div></div>`;
+    }
+
     // ---------- Previous pay ----------
     const pastPay = bills.filter(b => isPay(b) && b.startDate < paydayISO)
       .sort((x, y) => (x.startDate < y.startDate ? 1 : -1))
@@ -2453,6 +2630,12 @@
         label: `Saved across all goals over time, now ${formatMoney(totalSaved)} of ${formatMoney(totalTarget)}`
       });
     }
+    if (balancePoints.length >= 2) {
+      mountChart(document.getElementById('balanceChart'), {
+        kind: 'line', points: balancePoints, height: 140,
+        label: `Bank balance as entered over time, last ${formatMoney(latestBalance.amount)}`
+      });
+    }
     if (payHistory.length >= 2) {
       mountChart(document.getElementById('payChart'), {
         kind: 'columns', height: 140,
@@ -2468,6 +2651,11 @@
         })
       });
     }
+    el.querySelectorAll('.update-balance').forEach(btn => btn.addEventListener('click', openBalanceSheet));
+    el.querySelectorAll('.balance-to-goal').forEach(btn => btn.addEventListener('click', () => {
+      openDepositSheet(btn.dataset.id);
+      depositAmountInput.value = btn.dataset.amount;
+    }));
     el.querySelectorAll('.mark-paid').forEach(btn => btn.addEventListener('click', () => markPaid(btn)));
     el.querySelectorAll('.edit-bill').forEach(btn => btn.addEventListener('click', () => openBillSheet(btn.dataset.id)));
     el.querySelectorAll('.add-pay').forEach(btn => btn.addEventListener('click', () => openPaySheet(null, btn.dataset.date)));
@@ -2542,6 +2730,52 @@
       showToast('Pay deleted');
     } catch (e) {
       showToast("Couldn't delete — check your connection");
+    }
+  });
+
+  // ---------- Balance sheet ----------
+  // Each update adds an entry for the history chart, except that a second update on the same day replaces that day's.
+  const balanceOverlay = document.getElementById('balanceOverlay');
+  const balanceAmountInput = document.getElementById('balanceAmountInput');
+
+  function openBalanceSheet() {
+    const last = balances[balances.length - 1];
+    document.getElementById('balanceHint').textContent = 'The account your pay goes into and bills come out of, as your bank shows it now. ' +
+      'Use a minus sign if you\'re overdrawn.' + (last ? ` Last entered ${formatMoney(last.amount)} ${daysAgo(last.createdAt)}.` : '');
+    balanceAmountInput.value = '';
+    balanceOverlay.classList.add('open');
+    setTimeout(() => balanceAmountInput.focus(), 100);
+  }
+
+  function closeBalanceSheet() {
+    balanceOverlay.classList.remove('open');
+  }
+
+  document.getElementById('cancelBalance').addEventListener('click', closeBalanceSheet);
+  balanceOverlay.addEventListener('click', (e) => { if (e.target === balanceOverlay) closeBalanceSheet(); });
+
+  document.getElementById('saveBalance').addEventListener('click', async () => {
+    const amount = parseFloat(balanceAmountInput.value);
+    if (!Number.isFinite(amount)) { showToast('Enter your balance'); return; }
+    const last = balances[balances.length - 1];
+    const sameDay = last && daysAgo(last.createdAt) === 'today';
+    const saveBtn = document.getElementById('saveBalance');
+    saveBtn.disabled = true;
+    try {
+      if (sameDay) {
+        const createdAt = new Date().toISOString();
+        await saveRow('balances', last.id, { amount, created_at: createdAt });
+        Object.assign(last, { amount, createdAt });
+      } else {
+        balances.push(fromBalanceRow(await saveRow('balances', null, { amount })));
+      }
+      render();
+      closeBalanceSheet();
+      showToast(`Balance saved — ${formatMoney(amount)}`);
+    } catch (e) {
+      showToast("Couldn't save — check your connection");
+    } finally {
+      saveBtn.disabled = false;
     }
   });
 
@@ -3045,12 +3279,15 @@
     else drawLine(svg, spec, width, height);
   }
 
-  // Y gridlines with money ticks; returns the y-scale.
-  function drawYAxis(svg, max, pad, width, height) {
-    const top = niceCeil(max);
-    const y = v => pad.top + (1 - v / top) * (height - pad.top - pad.bottom);
-    [0, top / 2, top].forEach(v => {
+  // Y gridlines with money ticks; returns the y-scale. Goes below £0 only when `min` is negative.
+  function drawYAxis(svg, max, pad, width, height, min = 0) {
+    const top = max > 0 || min >= 0 ? niceCeil(max) : 0;
+    const bottom = min < 0 ? -niceCeil(-min) : 0;
+    const y = v => pad.top + ((top - v) / (top - bottom)) * (height - pad.top - pad.bottom);
+    (bottom < 0 ? [bottom, 0, top] : [0, top / 2, top]).forEach(v => {
       svgEl('line', { class: 'grid', x1: pad.left, x2: width - pad.right, y1: y(v), y2: y(v) }, svg);
+      // A small dip below £0 puts the £0 line close to the bottom one; label only the bottom then.
+      if (v === 0 && bottom < 0 && y(bottom) - y(0) < 14) return;
       const t = svgEl('text', { class: 'axis-text', x: pad.left - 6, y: y(v) + 3, 'text-anchor': 'end' }, svg);
       t.textContent = axisMoney(v);
     });
@@ -3108,7 +3345,7 @@
     const pts = spec.points;
     const pad = { top: 14, right: 12, bottom: 20, left: 48 };
     const max = Math.max(spec.target || 0, ...pts.map(p => p.y));
-    const y = drawYAxis(svg, max, pad, width, height);
+    const y = drawYAxis(svg, max, pad, width, height, Math.min(0, ...pts.map(p => p.y)));
     const t0 = +pts[0].x, t1 = Math.max(+new Date(), +pts[pts.length - 1].x);
     const x = t => pad.left + ((t - t0) / Math.max(1, t1 - t0)) * (width - pad.left - pad.right);
 
@@ -3133,9 +3370,10 @@
     xr.textContent = 'Today';
 
     // Crosshair snaps to the nearest deposit.
-    const cross = svgEl('line', { class: 'crosshair', y1: pad.top, y2: y(0), x1: 0, x2: 0, visibility: 'hidden' }, svg);
+    const floor = height - pad.bottom;
+    const cross = svgEl('line', { class: 'crosshair', y1: pad.top, y2: floor, x1: 0, x2: 0, visibility: 'hidden' }, svg);
     const marker = svgEl('circle', { class: 'dot', r: 4, cx: 0, cy: 0, visibility: 'hidden' }, svg);
-    const hit = svgEl('rect', { class: 'hit', x: pad.left, y: pad.top, width: width - pad.left - pad.right, height: y(0) - pad.top }, svg);
+    const hit = svgEl('rect', { class: 'hit', x: pad.left, y: pad.top, width: width - pad.left - pad.right, height: floor - pad.top }, svg);
     const track = ev => {
       const rect = svg.getBoundingClientRect();
       const px = ev.clientX - rect.left;
@@ -3263,7 +3501,7 @@
     document.getElementById('billList').innerHTML = '<div class="empty">Loading your bills…</div>';
     document.getElementById('budgetList').innerHTML = '<div class="empty">Loading your budgets…</div>';
     document.getElementById('overviewContent').innerHTML = '<div class="empty">Loading…</div>';
-    await Promise.all([loadGoals(), loadBills(), loadPayments(), loadAllDeposits(), loadBudgets(), loadPeriodSpends()]);
+    await Promise.all([loadGoals(), loadBills(), loadPayments(), loadAllDeposits(), loadBudgets(), loadPeriodSpends(), loadBalances()]);
     render();
   }
 
@@ -3280,6 +3518,7 @@
     allDeposits = [];
     budgets = [];
     periodSpends = [];
+    balances = [];
   }
 
   // Supabase reports INITIAL_SESSION on load and SIGNED_IN / SIGNED_OUT after, but also TOKEN_REFRESHED

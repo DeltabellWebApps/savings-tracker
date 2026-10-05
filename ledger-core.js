@@ -100,6 +100,33 @@
     return { start, end: addDays(nextPayday, -1), nextPayday };
   }
 
+  // ---------- Balance forecast ----------
+  // Where the current account is heading, day by day from today to `until`.
+  //   balance — the last balance entered
+  //   events  — [{ date, amount }] since that balance, signed (money in is positive). Ones dated before today
+  //             have already happened, so they move today's starting point rather than a later day.
+  //   spread  — a signed amount spread evenly over the days left, for spending with no set date (budgets)
+  // Returns today's estimate (`now`), the closing balance on `until` (`end`), the lowest closing balance
+  // on the way (`low`, on `lowDate`), and the first day it closes below £0 (`overdrawnDate`, or null).
+  function balanceForecast(balance, events, spread, until) {
+    const today = startOfToday();
+    const days = Math.max(1, Math.round((until - today) / 86400000) + 1);
+    const byDay = new Array(days).fill(0);
+    let now = balance;
+    events.forEach(e => {
+      const i = Math.round((e.date - today) / 86400000);
+      if (i < 0) now += e.amount;
+      else if (i < days) byDay[i] += e.amount;
+    });
+    let running = now, low = Infinity, lowDate = today, overdrawnDate = null;
+    byDay.forEach((amt, i) => {
+      running += amt + spread / days;
+      if (running < low - 0.005) { low = running; lowDate = addDays(today, i); }
+      if (running < -0.005 && !overdrawnDate) overdrawnDate = addDays(today, i);
+    });
+    return { now, end: running, low, lowDate, overdrawnDate };
+  }
+
   // ---------- Money ----------
   function formatMoney(n) {
     const sign = n < 0 ? '-' : '';
@@ -123,7 +150,8 @@
   //   planned   — this period's amount (from the target date, or the goal's monthly amount)
   //   committed — what the Overview sets aside: the plan, or more if more was saved; only what was saved if skipped
   //   afterSkip — the monthly amount needed from next period if this one is skipped
-  //   projection — a short forecast line (finish month, or ahead/behind a steady pace), or null
+  //   projection — a short forecast line (finish month, or ahead/behind a steady pace), or null;
+  //                `behindBy` holds the amount when it's behind
   function goalPlan(goal, deposits) {
     const period = currentPayPeriod();
     const mine = (deposits || []).filter(d => d.goalId === goal.id && new Date(d.createdAt) >= period.start);
@@ -175,7 +203,7 @@
       if (Math.abs(diff) < Math.max(1, monthlyShare / 2)) return { text: 'On schedule', tone: 'good' };
       return diff > 0
         ? { text: `${formatMoney(diff)} ahead of schedule`, tone: 'good' }
-        : { text: `${formatMoney(-diff)} behind schedule`, tone: 'behind' };
+        : { text: `${formatMoney(-diff)} behind schedule`, tone: 'behind', behindBy: -diff };
     }
 
     // With a monthly amount: count the periods still needed, this one included if its amount isn't in yet.
@@ -200,6 +228,6 @@
     FREQUENCY_LABELS, PER_MONTH, AVG_MONTH_MS,
     parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth, monthShort,
     occurrence, occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage,
-    currentPayPeriod, formatMoney, pctOf, isDone, goalPlan
+    currentPayPeriod, balanceForecast, formatMoney, pctOf, isDone, goalPlan
   };
 });
