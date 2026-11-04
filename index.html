@@ -279,8 +279,23 @@
     background: var(--paper);
     color: var(--ink);
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 15px;
+    /* 16px or more: iOS Safari zooms the page in on focus for anything smaller, and the zoom sticks after
+       the sheet closes, pushing the fixed tab bar off screen. Same for selects and the search boxes. */
+    font-size: 16px;
   }
+  /* iOS Safari gives date inputs a built-in minimum width that ignores width: 100%, so they spill off the
+     sheet. Dropping the native look lets them size like the other fields; min-height stops an empty one
+     collapsing, and the value is left-aligned like the text fields. */
+  .field input[type="date"] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 44px;
+    line-height: 1.2;
+  }
+  .field input[type="date"]::-webkit-date-and-time-value { text-align: left; }
   .field input:focus {
     outline: 2px solid var(--gold);
     outline-offset: 1px;
@@ -400,7 +415,7 @@
     background: var(--paper);
     color: var(--ink);
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 15px;
+    font-size: 16px;
   }
   .field select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
   .bill-foot {
@@ -522,7 +537,7 @@
     background: var(--paper-raised);
     color: var(--ink);
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 14px;
+    font-size: 16px;
   }
   .search-input:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
 
@@ -2019,9 +2034,10 @@
       matchesQuery(billQuery, b.name, b.category));
 
     const today = startOfToday();
-    const horizon = addDays(today, 30);
+    // Everything still unpaid up to the end of this pay period, including anything overdue from earlier.
+    const period = currentPayPeriod();
     const monthly = monthlyAverage(shown, today);
-    const outstanding = shown.reduce((s, b) => s + b.amount * unpaidBetween(b, trackFrom(b), horizon).length, 0);
+    const outstanding = shown.reduce((s, b) => s + b.amount * unpaidBetween(b, trackFrom(b), period.end).length, 0);
     const scope = activeBillCategory === 'All' ? '' : ` · ${escapeHtml(activeBillCategory)}`;
     totalsEl.style.display = 'flex';
     totalsEl.innerHTML = `
@@ -2031,7 +2047,7 @@
       </div>
       <div class="item">
         <div class="num">${formatMoney(outstanding)}</div>
-        <div class="lbl">unpaid, due in the next 30 days</div>
+        <div class="lbl">left to pay this pay period</div>
       </div>
     `;
 
@@ -2386,6 +2402,35 @@
     }
     html += '</div>';
 
+    // Other income sits under pay: one row per source. Sources due this period count towards left over;
+    // the rest stay listed (greyed, not counted) so they can still be edited, with the add button last.
+    const otherIncomeRows = otherIncome
+      .map(b => ({ b, dates: otherItems.filter(i => i.b === b).map(i => i.d) }))
+      .sort((x, y) => (!x.dates.length - !y.dates.length) || ((x.dates[0] || 0) - (y.dates[0] || 0)))
+      .map(({ b, dates }) => {
+        let meta, amt;
+        if (dates.length) {
+          const when = dates.length > 1
+            ? `${dates.length}× this period`
+            : `${dates[0] < today ? 'came in' : 'due'} ${shortDate(dates[0])}`;
+          meta = `${FREQUENCY_LABELS[b.frequency]} · ${when}`;
+          amt = `<div class="amt">+${formatMoney(b.amount * dates.length)}</div>`;
+        } else {
+          const next = nextDue(b);
+          meta = `${FREQUENCY_LABELS[b.frequency]} · ${next ? `not this period, next ${shortDate(next)}` : 'ended'}`;
+          amt = `<div class="amt" style="color: var(--ink-soft);">${formatMoney(b.amount)}</div>`;
+        }
+        return `
+        <div class="statement-row">
+          <div>${escapeHtml(b.name)}<span class="meta">${meta}</span></div>
+          <div class="row-end">${amt}<button class="btn-icon edit-bill" data-id="${b.id}">edit</button></div>
+        </div>`;
+      }).join('') + `
+        <div class="statement-row">
+          <div>${otherIncome.length ? '' : 'Other income<span class="meta">none added</span>'}</div>
+          <div class="row-end"><button class="btn-small" id="openAddIncome">+ Other income</button></div>
+        </div>`;
+
     html += `
       <h3 class="section-title">Pay period <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${periodLabel}</span></h3>
       <div class="statement">
@@ -2398,11 +2443,7 @@
             }
           </div>
         </div>
-        ${otherTotal > 0 ? `
-        <div class="statement-row">
-          <div>Other income<span class="meta">due this period</span></div>
-          <div class="amt">+${formatMoney(otherTotal)}</div>
-        </div>` : ''}
+        ${otherIncomeRows}
         <div class="statement-row">
           <div>Bills<span class="meta">due this period</span></div>
           <div class="amt">−${formatMoney(periodBillsTotal)}</div>
@@ -2594,25 +2635,6 @@
         </div>
       `).join('') + '</div>';
     }
-
-    // ---------- Other income ----------
-    html += `<h3 class="section-title">Other income</h3>`;
-    if (otherIncome.length) {
-      html += '<div class="statement">' + otherIncome.map(b => {
-        const next = nextDue(b);
-        const status = next ? `next ${shortDate(next)}` : 'ended';
-        return `
-          <div class="statement-row">
-            <div>${escapeHtml(b.name)}<span class="meta">${FREQUENCY_LABELS[b.frequency]} · ${status}</span></div>
-            <div class="row-end">
-              <div class="amt">${formatMoney(b.amount)}</div>
-              <button class="btn-icon edit-bill" data-id="${b.id}">edit</button>
-            </div>
-          </div>
-        `;
-      }).join('') + '</div>';
-    }
-    html += '<button class="add-goal-btn" id="openAddIncome" style="margin-top: 0;">+ Add other income</button>';
 
     el.innerHTML = html;
     el.querySelectorAll('.split-bar .seg').forEach(seg => {
