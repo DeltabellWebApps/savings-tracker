@@ -10,7 +10,7 @@ Live at <https://deltabellwebapps.github.io/savings-tracker/>.
 | Path | What it is |
 |---|---|
 | `index.html` | The whole web app: markup, styles and script. Four tabs: Overview, Goals, Bills, Budgets. |
-| `ledger-core.js` | The app's core rules: dates, bill schedules, the pay period, money formatting, goal plans and projections. The app needs it to load. |
+| `ledger-core.js` | The app's core rules: dates, bill schedules, pay periods, the yearly bills pot, money formatting, goal plans and projections. The app needs it to load. |
 | `supabase/` | SQL migrations, run by hand in the Supabase SQL editor. |
 
 There's no build step. GitHub Pages serves the files as they are.
@@ -20,14 +20,27 @@ There's no build step. GitHub Pages serves the files as they are.
 - **Pay period.** You're paid on the last day of each month, so a period runs from one payday to the day
   before the next. This is set in `currentPayPeriod()` in `ledger-core.js`.
 - **Pay.** Each month's pay is a one-off `bills` row with `kind = 'income'` and `category = 'pay'`, dated on payday.
+- **Other income** (benefits, side work, refunds) is a `bills` row with `kind = 'income'` and any other category,
+  repeating like a bill. It's listed per source under pay in the Overview's Pay period card, where you add and
+  edit it too. Sources due this period count towards left over; the rest are shown greyed with their next date.
 - **Bills** repeat weekly, fortnightly, monthly, quarterly or yearly from a start date, with an optional last
   payment date. A recurring bill is tracked from the day it was added; earlier occurrences count as settled.
   "Mark paid" records the usual amount, and "Other amount" records a different one for bills that vary.
+  Each recurring bill and category also shows what it costs over a year. The Bills tab's totals show the
+  monthly average and what's left to pay this pay period (anything still unpaid up to the day before payday,
+  overdue bills included).
+- **Yearly bills pot.** Yearly and quarterly bills are budgeted a month at a time: a twelfth (or a third) of
+  each counts in every pay period, and the bill itself isn't counted when it lands. The Bills tab lists them with
+  how much should be put by today so each is covered on its due date. The app doesn't track the pot's real
+  balance, and the bank balance forecast still takes each bill out on its due date.
+  The rules are in `yearlyBillsPot()` in `ledger-core.js`.
 - **Goals** have either a target date (the app works out the monthly amount) or a fixed monthly amount.
   A £0 deposit marks a month as skipped. Each goal shows a projection: ahead of or behind a steady pace for
   dated goals, or an estimated finish month for the others.
 - **Budgets** are monthly allowances (e.g. Groceries £300). They reset each payday, and spends are logged against them.
-- **Overview.** Pay + other income − bills = *left over*. Then subtract goals and budgets (each one's plan, or
+  The Budgets tab charts spending per pay period over the last six (all budgets, or one you tap), and each
+  budget's average over the finished ones against its allowance. Past periods use today's allowances.
+- **Overview.** Pay + other income − bills − the yearly bills pot = *left over*. Then subtract goals and budgets (each one's plan, or
   more if you've gone over it) to get *free to spend*.
 - **Bank balance.** You enter your current account balance by hand (a second update on the same day replaces
   that day's). The Overview carries it forward to the day before payday: bills still to come out, income still to
@@ -81,6 +94,19 @@ Magic links need the app's address allowed as a redirect:
 
 The link opens the app and signs you in on whichever device you open it on. Use "Sign up" to get a link
 that also creates the account.
+
+As it's a one-person app, turn new sign-ups off once your account exists:
+**Dashboard → Authentication → Sign In / Providers → "Allow new users to sign up"**. Row-level security
+already keeps other accounts out of your data, but there's no reason to let anyone make one.
+
+## Phone notes
+
+The app is mostly used in Safari on an iPhone. Two things to keep when editing the CSS:
+
+- Inputs, selects and search boxes use **16px or larger** text. Below that, iOS zooms the page in when one
+  is focused and the zoom sticks, pushing the fixed tab bar off screen.
+- Date inputs drop the native look (`appearance: none`, `min-width: 0`). Otherwise iOS gives them a minimum
+  width that runs off the edge of the form.
 
 ## Running locally
 
