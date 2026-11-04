@@ -480,6 +480,16 @@
   .projection-line { font-size: 11px; color: var(--ink-soft); margin: -6px 0 10px; }
   .projection-line.behind { color: var(--danger); }
 
+  /* Savings accounts */
+  .account-lines { margin: 2px 0 8px; }
+  .account-lines .statement-row { padding: 8px 0; }
+  .account-lines .statement-row .amt { font-size: 15px; }
+  .account-note { font-size: 11px; color: var(--ink-soft); margin: 0 0 8px; }
+  .account-note.warn { color: var(--danger); font-weight: 500; }
+  .account-note .bar-track { height: 5px; margin: 5px 0 0; }
+  .field-check { display: flex; gap: 8px; align-items: center; text-transform: none; }
+  .field-check input { width: auto; min-height: 0; }
+
   /* Drag to reorder */
   .drag-handle {
     font-size: 15px;
@@ -659,6 +669,7 @@
   <section class="view" id="goalsView">
     <p class="sub">What you're saving for, and how far you've come.</p>
 
+    <div id="accountList"></div>
     <div class="totals" id="totals"></div>
     <input class="search-input" id="goalSearch" type="search" placeholder="Search goals" autocomplete="off" style="display:none;">
     <div class="chip-row" id="categoryChips"></div>
@@ -858,6 +869,11 @@
       <input id="goalCategoryInput" type="text" placeholder="e.g. Travel" maxlength="30" list="categoryList">
       <datalist id="categoryList"></datalist>
     </div>
+    <div class="field" id="goalAccountField" style="display:none;">
+      <label for="goalAccountInput">Where's the money kept?</label>
+      <select id="goalAccountInput"></select>
+      <div class="field-hint">Saving to the goal then also records the move from your current account into this account.</div>
+    </div>
     <div class="field">
       <label for="goalDateInput">Target date (optional)</label>
       <input id="goalDateInput" type="date">
@@ -883,10 +899,19 @@
 <div class="overlay" id="depositOverlay">
   <div class="sheet">
     <h2 id="depositSheetTitle">Add to <span id="depositGoalName"></span></h2>
+    <div class="field" id="depositGoalField" style="display:none;">
+      <label for="depositGoalInput">Goal</label>
+      <select id="depositGoalInput"></select>
+    </div>
     <div class="field">
       <label for="depositAmountInput">Amount</label>
       <input id="depositAmountInput" type="number" inputmode="decimal" placeholder="0" step="0.01">
-      <div class="field-hint">Enter a negative number to correct or withdraw.</div>
+      <div class="field-hint" id="depositHint">Enter a negative number to correct or withdraw.</div>
+    </div>
+    <div class="field" id="depositSourceField" style="display:none;">
+      <label for="depositSourceInput">Where's the money from?</label>
+      <select id="depositSourceInput"></select>
+      <div class="field-hint">For a negative amount, "moved" means it went back to your current account.</div>
     </div>
     <div class="field">
       <label for="depositNoteInput">Note (optional)</label>
@@ -937,6 +962,127 @@
   </div>
 </div>
 
+<!-- Add/Edit Savings Account Sheet -->
+<div class="overlay" id="accountOverlay">
+  <div class="sheet">
+    <h2 id="accountSheetTitle">New savings account</h2>
+    <div class="field">
+      <label for="accountKindInput">Type</label>
+      <select id="accountKindInput">
+        <option value="saver">Regular saver</option>
+        <option value="isa">Cash ISA</option>
+        <option value="other">Other savings</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="accountNameInput">Name</label>
+      <input id="accountNameInput" type="text" placeholder="e.g. Regular saver" maxlength="40">
+    </div>
+    <div class="field" id="accountOpeningField">
+      <label for="accountOpeningInput">Balance now</label>
+      <input id="accountOpeningInput" type="number" inputmode="decimal" placeholder="0" step="0.01">
+      <div class="field-hint">As your bank shows it. Money already set aside for goals is part of this.</div>
+    </div>
+    <div class="field">
+      <label for="accountStandingInput">Standing order in (optional)</label>
+      <input id="accountStandingInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
+      <div class="field-hint">A fixed amount you move in every month. It counts in each pay period like a bill.</div>
+    </div>
+    <div class="field" id="accountStandingDateField">
+      <label for="accountStandingDateInput">Standing order date</label>
+      <input id="accountStandingDateInput" type="date">
+      <div class="field-hint">Any date it goes out. It repeats monthly from here.</div>
+    </div>
+    <div class="field" id="accountLimitField">
+      <label for="accountLimitInput">Monthly limit (optional)</label>
+      <input id="accountLimitInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
+      <div class="field-hint">The most the account lets you pay in each calendar month.</div>
+    </div>
+    <div class="field" id="accountMaturesField">
+      <label for="accountMaturesInput">Matures on (optional)</label>
+      <input id="accountMaturesInput" type="date">
+      <div class="field-hint">When the term ends. The standing order stops counting after this.</div>
+    </div>
+    <div class="field" id="accountFlexibleField">
+      <label class="field-check"><input id="accountFlexibleInput" type="checkbox"> Flexible ISA</label>
+      <div class="field-hint">Money you take out can be put back in the same tax year without using more allowance.</div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="cancelAccount">Cancel</button>
+      <button class="btn-primary" id="saveAccount">Save account</button>
+    </div>
+    <div class="sheet-actions" id="deleteAccountRow" style="display:none; margin-top: 10px;">
+      <button class="btn-secondary" id="archiveAccount">Archive</button>
+      <button class="btn-delete" id="deleteAccount">Delete this account</button>
+    </div>
+  </div>
+</div>
+
+<!-- Savings Account Balance Sheet -->
+<div class="overlay" id="accountBalanceOverlay">
+  <div class="sheet">
+    <h2>Balance — <span id="accountBalanceName"></span></h2>
+    <div class="field">
+      <label for="accountBalanceInput">Balance now</label>
+      <input id="accountBalanceInput" type="number" inputmode="decimal" placeholder="0" step="0.01">
+      <div class="field-hint" id="accountBalanceHint"></div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="cancelAccountBalance">Cancel</button>
+      <button class="btn-primary" id="saveAccountBalance">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Savings Account History Sheet (before the transfer sheet, so editing a transfer opens on top of it) -->
+<div class="overlay" id="accountHistoryOverlay">
+  <div class="sheet">
+    <h2>History — <span id="accountHistoryName"></span></h2>
+    <div class="chart" id="accountHistoryChart"></div>
+    <div id="accountHistoryList"></div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="closeAccountHistory" style="flex:1;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Transfer Sheet -->
+<div class="overlay" id="transferOverlay">
+  <div class="sheet">
+    <h2 id="transferSheetTitle">Move money</h2>
+    <div class="field">
+      <label for="transferAccountInput">Savings account</label>
+      <select id="transferAccountInput"></select>
+    </div>
+    <div class="field">
+      <label for="transferDirectionInput">Direction</label>
+      <select id="transferDirectionInput">
+        <option value="in">From current account into savings</option>
+        <option value="out">From savings back to current account</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="transferAmountInput">Amount</label>
+      <input id="transferAmountInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
+      <div class="field-hint" id="transferHint">Not for a goal? It stays unassigned in the account until you assign it.</div>
+    </div>
+    <div class="field">
+      <label for="transferDateInput">Date</label>
+      <input id="transferDateInput" type="date">
+    </div>
+    <div class="field">
+      <label for="transferNoteInput">Note (optional)</label>
+      <input id="transferNoteInput" type="text" placeholder="e.g. Bonus" maxlength="60">
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="cancelTransfer">Cancel</button>
+      <button class="btn-primary" id="saveTransfer">Save</button>
+    </div>
+    <div class="sheet-actions" id="deleteTransferRow" style="display:none; margin-top: 10px;">
+      <button class="btn-delete" id="deleteTransfer">Delete this transfer</button>
+    </div>
+  </div>
+</div>
 <!-- History Sheet -->
 <div class="overlay" id="historyOverlay">
   <div class="sheet">
@@ -997,12 +1143,17 @@
   let editingSpendId = null;
   let spendHistoryBudgetId = null;
   let balances = [];       // current account balances as entered, oldest first
-  const showArchived = { goals: false, bills: false, budgets: false };
+  let accounts = [];       // savings accounts (regular saver, ISA, ...)
+  let accountEntries = []; // savings account balances as entered, oldest first
+  let transfers = [];      // money moved between the current account and a savings account
+  let accountsReady = false; // false until migration 003 has been run; accounts stay hidden until then
+  const showArchived = { goals: false, bills: false, budgets: false, accounts: false };
 
   const {
     FREQUENCY_LABELS, parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth,
     occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage, currentPayPeriod, balanceForecast, formatMoney,
-    PER_MONTH, isPotBill, yearlyBillsPot, payPeriodFor
+    PER_MONTH, isPotBill, yearlyBillsPot, payPeriodFor,
+    ISA_ALLOWANCE, PERSONAL_SAVINGS_ALLOWANCE, standingOrder, transferTime, accountState
   } = LedgerCore;
 
   // ---------- Mapping ----------
@@ -1017,6 +1168,7 @@
       monthlyAmount: row.monthly_amount == null ? null : Number(row.monthly_amount),
       sortOrder: row.sort_order == null ? 0 : Number(row.sort_order),
       archived: !!row.archived,
+      accountId: row.account_id || null,
       createdAt: row.created_at
     };
   }
@@ -1026,6 +1178,37 @@
       goalId: row.goal_id,
       amount: Number(row.amount),
       note: row.note || '',
+      createdAt: row.created_at
+    };
+  }
+  function fromAccountRow(row) {
+    const num = v => v == null ? null : Number(v);
+    return {
+      id: row.id,
+      name: row.name,
+      kind: row.kind || 'saver',
+      standingAmount: num(row.standing_amount),
+      standingStart: row.standing_start || null,
+      monthlyLimit: num(row.monthly_limit),
+      maturesOn: row.matures_on || null,
+      flexible: !!row.flexible,
+      sortOrder: row.sort_order == null ? 0 : Number(row.sort_order),
+      archived: !!row.archived,
+      createdAt: row.created_at
+    };
+  }
+  function fromAccountEntryRow(row) {
+    return { id: row.id, accountId: row.account_id, amount: Number(row.amount), createdAt: row.created_at };
+  }
+  function fromTransferRow(row) {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      amount: Number(row.amount),
+      movedOn: row.moved_on,
+      note: row.note || '',
+      depositId: row.deposit_id || null,
+      dueDate: row.due_date || null,
       createdAt: row.created_at
     };
   }
@@ -1042,15 +1225,17 @@
     }
   }
 
-  async function createGoalRemote(name, target, category, targetDate, monthlyAmount) {
+  async function createGoalRemote(name, target, category, targetDate, monthlyAmount, accountId) {
     const nextOrder = goals.length ? Math.max(...goals.map(g => g.sortOrder)) + 1 : 1;
-    const { data, error } = await sb.from('goals').insert([{
+    const row = {
       name, target, saved: 0,
       category: category || null,
       target_date: targetDate || null,
       monthly_amount: monthlyAmount,
       sort_order: nextOrder
-    }]).select();
+    };
+    if (accountsReady) row.account_id = accountId || null;
+    const { data, error } = await sb.from('goals').insert([row]).select();
     if (error) throw error;
     return fromGoalRow(data[0]);
   }
@@ -1254,6 +1439,32 @@
     }
   }
 
+  // ---------- Savings accounts CRUD ----------
+  // These tables arrive with migration 003. Until it's run the queries fail and accounts stay hidden.
+  async function loadAccounts() {
+    try {
+      const [a, e, t] = await Promise.all([
+        sb.from('accounts').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }),
+        sb.from('account_balances').select('*').order('created_at', { ascending: true }),
+        sb.from('transfers').select('*').order('moved_on', { ascending: true })
+      ]);
+      if (a.error || e.error || t.error) throw a.error || e.error || t.error;
+      accounts = a.data.map(fromAccountRow);
+      accountEntries = e.data.map(fromAccountEntryRow);
+      transfers = t.data.map(fromTransferRow);
+      accountsReady = true;
+    } catch (err) {
+      accounts = [];
+      accountEntries = [];
+      transfers = [];
+      accountsReady = false;
+    }
+  }
+
+  async function createTransferRemote(fields) {
+    return fromTransferRow(await saveRow('transfers', null, fields));
+  }
+
   async function saveRow(table, id, fields) {
     if (id) {
       const { error } = await sb.from(table).update(fields).eq('id', id);
@@ -1376,14 +1587,70 @@
     return { spent, left: budget.amount - spent, over: spent > budget.amount, committed: Math.max(budget.amount, spent) };
   }
 
-  // Carries a balance entered this pay period forward to the day before payday. Goal money goes to a separate
-  // savings account, so deposits leave the current account. What counts as already in the balance:
-  //   bills    — due before the day it was entered and marked paid, or marked paid before it was entered;
-  //              unpaid overdue ones come out today
-  //   income   — dated on or before the day it was entered
-  //   deposits — made before it was entered
-  //   spends   — logged before it was entered, or dated before that day
-  // What's still to save this month comes out today; what's left in budgets is spread evenly to payday.
+  // ---------- Savings accounts ----------
+  const ACCOUNT_KINDS = { saver: 'Regular saver', isa: 'Cash ISA', other: 'Savings' };
+  const liveAccounts = () => accounts.filter(a => !a.archived);
+
+  // The live account a goal's money is kept in, or null (goals with none work as they did before accounts).
+  function accountOf(goal) {
+    return goal && goal.accountId ? liveAccounts().find(a => a.id === goal.accountId) || null : null;
+  }
+
+  // An account's balance, interest and allowances (see LedgerCore.accountState), plus the goals kept in it
+  // and what's in it that no goal has claimed.
+  function accountInfo(account) {
+    const state = accountState(account, accountEntries, transfers, startOfToday());
+    const goalsIn = liveGoals().filter(g => g.accountId === account.id);
+    const inGoals = goalsIn.reduce((s, g) => s + g.saved, 0);
+    return { ...state, goalsIn, inGoals, unassigned: state.balance - inGoals };
+  }
+
+  // Standing order dates in [from, to], from the day the account was added.
+  function standingBetween(account, from, to) {
+    const so = standingOrder(account);
+    if (!so) return [];
+    const since = trackFrom(so);
+    return occurrencesBetween(so, from, to).filter(d => d >= since);
+  }
+
+  function standingDone(account, d) {
+    const iso = toISODate(d);
+    return transfers.find(t => t.accountId === account.id && t.dueDate === iso) || null;
+  }
+
+  // What an account takes out of the current account this pay period:
+  //   moved          — transfers (net) dated in the period
+  //   unpaidStanding — standing order dates in the period not yet marked done
+  //   goalsLeft      — what its goals still want this period (plans not met yet; skipped goals want nothing)
+  //   extra          — the part of goalsLeft that this period's money in (moved so far, plus the standing order
+  //                    still to go) doesn't cover. Money that was already in the account doesn't count until
+  //                    it's assigned to a goal, which lowers goalsLeft instead.
+  //   committed      — moved + standing order still to go + extra
+  function accountSaving(account, period, info) {
+    info = info || accountInfo(account);
+    const from = toISODate(period.start), to = toISODate(period.end);
+    const moved = transfers.filter(t => t.accountId === account.id && t.movedOn >= from && t.movedOn <= to)
+      .reduce((s, t) => s + t.amount, 0);
+    const unpaidStanding = standingBetween(account, period.start, period.end).filter(d => !standingDone(account, d));
+    const standingLeft = unpaidStanding.length * (account.standingAmount || 0);
+    const goalsLeft = info.goalsIn.reduce((s, g) => {
+      const p = goalPlan(g);
+      return s + (p.skip ? 0 : Math.max(0, p.planned - Math.max(0, p.savedThisPeriod)));
+    }, 0);
+    const extra = Math.max(0, goalsLeft - Math.max(0, moved) - standingLeft);
+    return { moved, unpaidStanding, standingLeft, goalsLeft, extra, committed: Math.max(0, moved + standingLeft + extra) };
+  }
+
+  // Carries a balance entered this pay period forward to the day before payday. What counts as already in it:
+  //   bills     — due before the day it was entered and marked paid, or marked paid before it was entered;
+  //               unpaid overdue ones come out today
+  //   income    — dated on or before the day it was entered
+  //   transfers — to or from savings accounts, made before it was entered
+  //   deposits  — for goals without a savings account (their money is assumed to leave the current account),
+  //               made before it was entered
+  //   spends    — logged before it was entered, or dated before that day
+  // Standing orders still to go come out on their dates; what goals still need comes out today; what's left in
+  // budgets is spread evenly to payday.
   function balanceOutlook(entry, period) {
     const at = new Date(entry.createdAt);
     const atDay = new Date(at.getFullYear(), at.getMonth(), at.getDate());
@@ -1403,11 +1670,20 @@
         else if (!p && d >= trackFrom(b)) add('bills', d < today ? today : d, -b.amount);
       });
     });
-    allDeposits.filter(d => new Date(d.createdAt) > at).forEach(d => add('goals', dayOf(d.createdAt), -d.amount));
-    liveGoals().forEach(g => {
+    const paired = new Set(transfers.map(t => t.depositId).filter(Boolean));
+    const goalById = new Map(goals.map(g => [g.id, g]));
+    allDeposits.filter(d => new Date(d.createdAt) > at && !paired.has(d.id) && !accountOf(goalById.get(d.goalId)))
+      .forEach(d => add('goals', dayOf(d.createdAt), -d.amount));
+    transfers.filter(t => transferTime(t) > at).forEach(t => add('goals', parseLocalDate(t.movedOn), -t.amount));
+    liveGoals().filter(g => !accountOf(g)).forEach(g => {
       const plan = goalPlan(g);
       const toSave = plan.skip ? 0 : Math.max(0, plan.planned - Math.max(0, plan.savedThisPeriod));
       if (toSave > 0) add('goals', today, -toSave);
+    });
+    liveAccounts().forEach(a => {
+      const s = accountSaving(a, period);
+      s.unpaidStanding.forEach(d => add('goals', d < today ? today : d, -a.standingAmount));
+      if (s.extra > 0) add('goals', today, -s.extra);
     });
     periodSpends.filter(s => new Date(s.createdAt) > at && parseLocalDate(s.spentOn) >= atDay)
       .forEach(s => add('budgets', parseLocalDate(s.spentOn), -s.amount));
@@ -1459,7 +1735,7 @@
 
   // Archived items drop out of every list, total and chart, but keep their history.
   async function setArchived(key, id, archived) {
-    const list = { goals, bills, budgets }[key];
+    const list = { goals, bills, budgets, accounts }[key];
     const item = list.find(x => x.id === id);
     try {
       await saveRow(key, id, { archived });
@@ -1524,6 +1800,7 @@
   // ---------- Main render ----------
   function render() {
     indexPayments();
+    renderAccounts();
     renderGoals();
     renderBills();
     renderBudgets();
@@ -1597,7 +1874,7 @@
               <button class="btn-icon edit-goal" data-id="${g.id}">edit</button>
             </div>
           </div>
-          ${g.category ? `<div class="badge-category">${escapeHtml(g.category)}</div>` : ''}
+          ${g.category || accountOf(g) ? `<div class="badge-category">${[g.category, accountOf(g) && accountOf(g).name].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
           <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
           ${suggestionHtml}
           ${projectionHtml}
@@ -1637,6 +1914,476 @@
       });
     });
   }
+
+  // ---------- Savings accounts render ----------
+  // At the top of the Goals tab: each account's balance, which goals claim it and what's unassigned,
+  // its standing order, allowance or limit, maturity and interest.
+  function renderAccounts() {
+    const el = document.getElementById('accountList');
+    if (!accountsReady) { el.innerHTML = ''; return; }
+    const live = liveAccounts();
+    const today = startOfToday();
+    const period = currentPayPeriod();
+    const dayMonth = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    let html = `<h3 class="section-title" style="margin-top: 0;">Savings accounts</h3>`;
+
+    if (!live.length) {
+      html += `<div class="statement"><div class="statement-row"><div>No savings accounts yet<span class="meta">Add your regular saver or ISA to keep track of what you move in, what's unassigned and the interest.</span></div></div></div>`;
+    }
+
+    let outsideIsaInterest = 0, anyInterest = false;
+    html += '<div class="goal-list">' + live.map(a => {
+      const info = accountInfo(a);
+      if (info.interest.length) anyInterest = true;
+      if (a.kind !== 'isa') outsideIsaInterest += info.interestThisYear;
+      const lines = info.goalsIn.map(g => `
+        <div class="statement-row">
+          <div>${escapeHtml(g.name)}</div>
+          <div class="amt">${formatMoney(g.saved)}</div>
+        </div>`);
+      if (!info.goalsIn.length || Math.abs(info.unassigned) >= 0.005) {
+        lines.push(`
+        <div class="statement-row">
+          <div>Unassigned<span class="meta">${info.unassigned < 0 ? 'goals claim more than the balance — update it, or check the goals' : info.goalsIn.length ? 'not set aside for a goal' : 'no goals kept here yet'}</span></div>
+          <div class="row-end">
+            <div class="amt ${info.unassigned < 0 ? 'negative' : ''}">${formatMoney(info.unassigned)}</div>
+            ${info.unassigned > 0.005 && info.goalsIn.length ? `<button class="btn-small assign-account" data-id="${a.id}">Assign</button>` : ''}
+          </div>
+        </div>`);
+      }
+
+      const notes = [];
+      // Standing order: any date this period up to today not marked done gets a button; otherwise the next one.
+      const so = standingOrder(a);
+      if (so) {
+        const due = standingBetween(a, addDays(period.start, -31), today).filter(d => !standingDone(a, d));
+        due.forEach(d => notes.push(`<div class="account-note ${d < today ? 'warn' : ''}" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span>Standing order ${formatMoney(a.standingAmount)} · ${d < today ? 'was due' : 'due today'} ${shortDate(d)}</span>
+          <button class="btn-small standing-done" data-id="${a.id}" data-date="${toISODate(d)}">Done</button></div>`));
+        if (!due.length) {
+          const next = occurrencesFrom(so, addDays(today, 1)).next().value;
+          notes.push(`<div class="account-note">Standing order ${formatMoney(a.standingAmount)} a month${next ? ` · next ${shortDate(next)}` : a.maturesOn ? ' · none left before it matures' : ' · ended'}</div>`);
+        }
+      }
+      if (a.kind === 'isa') {
+        const pct = Math.min(100, (info.isaUsed / ISA_ALLOWANCE) * 100);
+        notes.push(`<div class="account-note ${info.isaUsed > ISA_ALLOWANCE ? 'warn' : ''}">ISA allowance: ${formatMoney(info.isaUsed)} of ${formatMoney(ISA_ALLOWANCE)} used this tax year${a.flexible && info.takenOutThisYear > 0 ? ` (flexible: ${formatMoney(info.takenOutThisYear)} taken out can go back in)` : ''}
+          <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div>`);
+      }
+      if (a.monthlyLimit) {
+        const over = info.paidInThisMonth > a.monthlyLimit + 0.005;
+        notes.push(`<div class="account-note ${over ? 'warn' : ''}">${formatMoney(info.paidInThisMonth)} of ${formatMoney(a.monthlyLimit)} paid in this month${over ? ' — over the limit' : ''}</div>`);
+      }
+      if (a.maturesOn) {
+        const m = parseLocalDate(a.maturesOn);
+        const days = Math.round((m - today) / 86400000);
+        if (days < 0) notes.push(`<div class="account-note warn">Matured ${dayMonth(m)} — move the money somewhere that pays interest.</div>`);
+        else if (days <= 30) notes.push(`<div class="account-note warn">Matures in ${days} day${days === 1 ? '' : 's'} (${dayMonth(m)}) — decide where the money goes next.</div>`);
+        else notes.push(`<div class="account-note">Matures ${dayMonth(m)}</div>`);
+      }
+      if (info.interest.length) {
+        notes.push(`<div class="account-note">Interest this tax year ${formatMoney(info.interestThisYear)}${a.kind === 'isa' ? ' · tax-free' : ''}</div>`);
+      }
+      const balanceMeta = info.latestEntry
+        ? `balance updated ${daysAgo(info.latestEntry.createdAt)}`
+        : 'no balance entered · worked out from transfers';
+
+      return `
+        <div class="goal account" data-id="${a.id}">
+          <div class="goal-head">
+            <div class="goal-name"><span>${escapeHtml(a.name)}</span></div>
+            <div class="goal-head-actions">
+              <div class="bill-amount ${info.balance < 0 ? 'negative' : ''}">${formatMoney(info.balance)}</div>
+              <button class="btn-icon edit-account" data-id="${a.id}">edit</button>
+            </div>
+          </div>
+          <div class="badge-category">${ACCOUNT_KINDS[a.kind] || 'Savings'} · ${balanceMeta}</div>
+          <div class="account-lines">${lines.join('')}</div>
+          ${notes.join('')}
+          <div class="goal-foot">
+            <div class="goal-actions">
+              <button class="btn-small account-history" data-id="${a.id}">History</button>
+              <button class="btn-small account-balance" data-id="${a.id}">Update balance</button>
+              <button class="btn-small account-move" data-id="${a.id}">Move money</button>
+            </div>
+          </div>
+        </div>`;
+    }).join('') + '</div>';
+
+    if (anyInterest && outsideIsaInterest > 0) {
+      html += `<div class="account-note" style="margin-top: 10px;">Interest outside ISAs this tax year: ${formatMoney(outsideIsaInterest)} of the ${formatMoney(PERSONAL_SAVINGS_ALLOWANCE)} you can earn tax-free as a basic-rate taxpayer (£500 at higher rate).</div>`;
+    }
+    html += `<button class="add-goal-btn" id="openAddAccount">+ Savings account</button><div id="accountArchive"></div>`;
+    if (live.length) html += `<h3 class="section-title">Goals</h3>`;
+    el.innerHTML = html;
+
+    renderArchive('accountArchive', 'accounts', accounts.filter(a => a.archived).map(a => ({
+      id: a.id, name: a.name, meta: ACCOUNT_KINDS[a.kind] || 'Savings', amount: formatMoney(accountInfo(a).balance)
+    })), 'accounts');
+    document.getElementById('openAddAccount').addEventListener('click', () => openAccountSheet(null));
+    el.querySelectorAll('.edit-account').forEach(btn => btn.addEventListener('click', () => openAccountSheet(btn.dataset.id)));
+    el.querySelectorAll('.account-balance').forEach(btn => btn.addEventListener('click', () => openAccountBalanceSheet(btn.dataset.id)));
+    el.querySelectorAll('.account-move').forEach(btn => btn.addEventListener('click', () => openTransferSheet(null, btn.dataset.id)));
+    el.querySelectorAll('.account-history').forEach(btn => btn.addEventListener('click', () => openAccountHistory(btn.dataset.id)));
+    el.querySelectorAll('.assign-account').forEach(btn => btn.addEventListener('click', () => openAssignSheet(btn.dataset.id)));
+    el.querySelectorAll('.standing-done').forEach(btn => btn.addEventListener('click', () => markStandingDone(btn)));
+  }
+
+  // Records a standing order occurrence as moved, dated the day it was due (or today, if that's later).
+  async function markStandingDone(btn) {
+    const a = accounts.find(x => x.id === btn.dataset.id);
+    const dueISO = btn.dataset.date;
+    const todayISO = toISODate(startOfToday());
+    btn.disabled = true;
+    try {
+      transfers.push(await createTransferRemote({
+        account_id: a.id, amount: a.standingAmount, moved_on: dueISO < todayISO ? dueISO : todayISO,
+        note: 'Standing order', due_date: dueISO
+      }));
+      render();
+      showToast(`Moved ${formatMoney(a.standingAmount)} to ${a.name}`);
+      warnOverLimit(a);
+    } catch (e) {
+      btn.disabled = false;
+      showToast("Couldn't save — check your connection");
+    }
+  }
+
+  function warnOverLimit(a) {
+    if (!a.monthlyLimit) return;
+    const paid = accountInfo(a).paidInThisMonth;
+    if (paid > a.monthlyLimit + 0.005) setTimeout(() => showToast(`That's ${formatMoney(paid)} into ${a.name} this month — over its ${formatMoney(a.monthlyLimit)} limit`), 1900);
+  }
+
+  // ---------- Savings account sheet ----------
+  const accountOverlay = document.getElementById('accountOverlay');
+  const accountKindInput = document.getElementById('accountKindInput');
+  const accountNameInput = document.getElementById('accountNameInput');
+  const accountOpeningInput = document.getElementById('accountOpeningInput');
+  const accountStandingInput = document.getElementById('accountStandingInput');
+  const accountStandingDateInput = document.getElementById('accountStandingDateInput');
+  const accountLimitInput = document.getElementById('accountLimitInput');
+  const accountMaturesInput = document.getElementById('accountMaturesInput');
+  const accountFlexibleInput = document.getElementById('accountFlexibleInput');
+  let editingAccountId = null;
+
+  // A regular saver has a monthly limit and a maturity date; an ISA can be flexible.
+  function syncAccountFields() {
+    const kind = accountKindInput.value;
+    document.getElementById('accountLimitField').style.display = kind === 'saver' ? 'block' : 'none';
+    document.getElementById('accountMaturesField').style.display = kind === 'saver' ? 'block' : 'none';
+    document.getElementById('accountFlexibleField').style.display = kind === 'isa' ? 'block' : 'none';
+    document.getElementById('accountStandingDateField').style.display = accountStandingInput.value ? 'block' : 'none';
+    accountNameInput.placeholder = `e.g. ${ACCOUNT_KINDS[kind] === 'Savings' ? 'Easy access saver' : ACCOUNT_KINDS[kind]}`;
+  }
+  accountKindInput.addEventListener('change', syncAccountFields);
+  accountStandingInput.addEventListener('input', syncAccountFields);
+
+  function openAccountSheet(id) {
+    editingAccountId = id || null;
+    const a = id ? accounts.find(x => x.id === id) : null;
+    document.getElementById('accountSheetTitle').textContent = a ? 'Edit savings account' : 'New savings account';
+    accountKindInput.value = a ? a.kind : 'saver';
+    accountNameInput.value = a ? a.name : '';
+    accountOpeningInput.value = '';
+    document.getElementById('accountOpeningField').style.display = a ? 'none' : 'block';
+    accountStandingInput.value = a && a.standingAmount ? a.standingAmount : '';
+    accountStandingDateInput.value = a && a.standingStart ? a.standingStart : '';
+    accountLimitInput.value = a && a.monthlyLimit ? a.monthlyLimit : '';
+    accountMaturesInput.value = a && a.maturesOn ? a.maturesOn : '';
+    accountFlexibleInput.checked = !!(a && a.flexible);
+    document.getElementById('deleteAccountRow').style.display = a ? 'flex' : 'none';
+    syncAccountFields();
+    accountOverlay.classList.add('open');
+  }
+
+  function closeAccountSheet() {
+    accountOverlay.classList.remove('open');
+    editingAccountId = null;
+  }
+
+  document.getElementById('cancelAccount').addEventListener('click', closeAccountSheet);
+  accountOverlay.addEventListener('click', (e) => { if (e.target === accountOverlay) closeAccountSheet(); });
+
+  document.getElementById('saveAccount').addEventListener('click', async () => {
+    const kind = accountKindInput.value;
+    const name = accountNameInput.value.trim() || ACCOUNT_KINDS[kind];
+    const standingRaw = accountStandingInput.value.trim();
+    const standing = standingRaw ? parseFloat(standingRaw) : null;
+    if (standing !== null && !(standing > 0)) { showToast('Enter a standing order above £0, or leave it blank'); return; }
+    if (hasBadDate(accountStandingDateInput) || hasBadDate(accountMaturesInput)) { showToast("That date doesn't exist"); return; }
+    if (standing && !accountStandingDateInput.value) { showToast('Enter the standing order date'); return; }
+    const limitRaw = accountLimitInput.value.trim();
+    const limit = kind === 'saver' && limitRaw ? parseFloat(limitRaw) : null;
+    if (limit !== null && !(limit > 0)) { showToast('Enter a monthly limit above £0, or leave it blank'); return; }
+    const openingRaw = accountOpeningInput.value.trim();
+    const opening = openingRaw ? parseFloat(openingRaw) : null;
+    if (!editingAccountId && opening !== null && !Number.isFinite(opening)) { showToast('Enter the balance'); return; }
+
+    const fields = {
+      name, kind,
+      standing_amount: standing,
+      standing_start: standing ? accountStandingDateInput.value : null,
+      monthly_limit: limit,
+      matures_on: kind === 'saver' && accountMaturesInput.value ? accountMaturesInput.value : null,
+      flexible: kind === 'isa' && accountFlexibleInput.checked
+    };
+    const saveBtn = document.getElementById('saveAccount');
+    saveBtn.disabled = true;
+    try {
+      if (editingAccountId) {
+        await saveRow('accounts', editingAccountId, fields);
+        Object.assign(accounts.find(a => a.id === editingAccountId), fromAccountRow({ ...fields, id: editingAccountId,
+          sort_order: accounts.find(a => a.id === editingAccountId).sortOrder, archived: accounts.find(a => a.id === editingAccountId).archived,
+          created_at: accounts.find(a => a.id === editingAccountId).createdAt }));
+      } else {
+        fields.sort_order = accounts.length ? Math.max(...accounts.map(a => a.sortOrder)) + 1 : 1;
+        const a = fromAccountRow(await saveRow('accounts', null, fields));
+        accounts.push(a);
+        if (opening !== null) {
+          accountEntries.push(fromAccountEntryRow(await saveRow('account_balances', null, { account_id: a.id, amount: opening })));
+        }
+      }
+      render();
+      closeAccountSheet();
+      showToast(`Saved ${name}`);
+    } catch (e) {
+      showToast("Couldn't save — check your connection");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  document.getElementById('archiveAccount').addEventListener('click', async () => {
+    if (editingAccountId && await setArchived('accounts', editingAccountId, true)) closeAccountSheet();
+  });
+
+  document.getElementById('deleteAccount').addEventListener('click', async () => {
+    if (!editingAccountId) return;
+    const id = editingAccountId;
+    const a = accounts.find(x => x.id === id);
+    if (!(await askConfirm(`Delete ${a.name}?`,
+      "This removes the account, its balances and its transfers. Goals kept in it stay, with no account. It can't be undone.", 'Delete', true))) return;
+    try {
+      await deleteRow('accounts', id);
+      accounts = accounts.filter(x => x.id !== id);
+      accountEntries = accountEntries.filter(e => e.accountId !== id);
+      transfers = transfers.filter(t => t.accountId !== id);
+      goals.forEach(g => { if (g.accountId === id) g.accountId = null; });
+      render();
+      closeAccountSheet();
+      showToast('Account deleted');
+    } catch (e) {
+      showToast("Couldn't delete — check your connection");
+    }
+  });
+
+  // ---------- Savings account balance sheet ----------
+  // Like the current account's: a second update on the same day replaces that day's.
+  const accountBalanceOverlay = document.getElementById('accountBalanceOverlay');
+  const accountBalanceInput = document.getElementById('accountBalanceInput');
+  let balanceAccountId = null;
+
+  function openAccountBalanceSheet(id) {
+    balanceAccountId = id;
+    const a = accounts.find(x => x.id === id);
+    const info = accountInfo(a);
+    document.getElementById('accountBalanceName').textContent = a.name;
+    document.getElementById('accountBalanceHint').textContent = info.latestEntry
+      ? `From your last balance and transfers since, it should be about ${formatMoney(info.balance)}. Anything above that counts as interest.`
+      : 'As your bank shows it now.';
+    accountBalanceInput.value = '';
+    accountBalanceOverlay.classList.add('open');
+    setTimeout(() => accountBalanceInput.focus(), 100);
+  }
+
+  function closeAccountBalanceSheet() {
+    accountBalanceOverlay.classList.remove('open');
+    balanceAccountId = null;
+  }
+
+  document.getElementById('cancelAccountBalance').addEventListener('click', closeAccountBalanceSheet);
+  accountBalanceOverlay.addEventListener('click', (e) => { if (e.target === accountBalanceOverlay) closeAccountBalanceSheet(); });
+
+  document.getElementById('saveAccountBalance').addEventListener('click', async () => {
+    const amount = parseFloat(accountBalanceInput.value);
+    if (!Number.isFinite(amount)) { showToast('Enter the balance'); return; }
+    const a = accounts.find(x => x.id === balanceAccountId);
+    const before = accountInfo(a);
+    const last = before.latestEntry && accountEntries.find(e => e.id === before.latestEntry.id);
+    const sameDay = last && daysAgo(last.createdAt) === 'today';
+    const saveBtn = document.getElementById('saveAccountBalance');
+    saveBtn.disabled = true;
+    try {
+      if (sameDay) {
+        const createdAt = new Date().toISOString();
+        await saveRow('account_balances', last.id, { amount, created_at: createdAt });
+        Object.assign(last, { amount, createdAt });
+      } else {
+        accountEntries.push(fromAccountEntryRow(await saveRow('account_balances', null, { account_id: a.id, amount })));
+      }
+      const gained = sameDay ? 0 : amount - before.balance;
+      render();
+      closeAccountBalanceSheet();
+      showToast(before.latestEntry && !sameDay && Math.abs(gained) >= 0.005
+        ? `${a.name} saved · ${formatMoney(gained)} interest`
+        : `${a.name} saved — ${formatMoney(amount)}`);
+    } catch (e) {
+      showToast("Couldn't save — check your connection");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  // ---------- Transfer sheet ----------
+  // Money moved by hand between the current account and a savings account. Transfers made by saving to a goal
+  // are edited from that goal's history instead.
+  const transferOverlay = document.getElementById('transferOverlay');
+  const transferAccountInput = document.getElementById('transferAccountInput');
+  const transferDirectionInput = document.getElementById('transferDirectionInput');
+  const transferAmountInput = document.getElementById('transferAmountInput');
+  const transferDateInput = document.getElementById('transferDateInput');
+  const transferNoteInput = document.getElementById('transferNoteInput');
+  let editingTransferId = null;
+
+  function openTransferSheet(id, accountId) {
+    const t = id ? transfers.find(x => x.id === id) : null;
+    editingTransferId = t ? t.id : null;
+    const list = accounts.filter(a => !a.archived || (t && a.id === t.accountId));
+    transferAccountInput.innerHTML = list.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+    transferAccountInput.value = t ? t.accountId : accountId;
+    transferDirectionInput.value = t && t.amount < 0 ? 'out' : 'in';
+    transferAmountInput.value = t ? Math.abs(t.amount) : '';
+    transferDateInput.value = t ? t.movedOn : toISODate(startOfToday());
+    transferNoteInput.value = t ? t.note : '';
+    document.getElementById('transferSheetTitle').textContent = t ? 'Edit transfer' : 'Move money';
+    document.getElementById('deleteTransferRow').style.display = t ? 'flex' : 'none';
+    transferOverlay.classList.add('open');
+    if (!t) setTimeout(() => transferAmountInput.focus(), 100);
+  }
+
+  function closeTransferSheet() {
+    transferOverlay.classList.remove('open');
+    editingTransferId = null;
+  }
+
+  document.getElementById('cancelTransfer').addEventListener('click', closeTransferSheet);
+  transferOverlay.addEventListener('click', (e) => { if (e.target === transferOverlay) closeTransferSheet(); });
+
+  document.getElementById('saveTransfer').addEventListener('click', async () => {
+    const raw = parseFloat(transferAmountInput.value);
+    if (!(raw > 0)) { showToast('Enter an amount'); return; }
+    if (!transferDateInput.value || hasBadDate(transferDateInput)) { showToast('Enter the date'); return; }
+    const amount = transferDirectionInput.value === 'out' ? -raw : raw;
+    const a = accounts.find(x => x.id === transferAccountInput.value);
+    const fields = { account_id: a.id, amount, moved_on: transferDateInput.value, note: transferNoteInput.value.trim() || null };
+    const saveBtn = document.getElementById('saveTransfer');
+    saveBtn.disabled = true;
+    try {
+      if (editingTransferId) {
+        await saveRow('transfers', editingTransferId, fields);
+        Object.assign(transfers.find(t => t.id === editingTransferId),
+          { accountId: a.id, amount, movedOn: fields.moved_on, note: fields.note || '' });
+      } else {
+        transfers.push(await createTransferRemote(fields));
+      }
+      render();
+      closeTransferSheet();
+      if (accountHistoryOverlay.classList.contains('open')) openAccountHistory(historyAccountId);
+      showToast(`${amount > 0 ? 'Moved' : 'Took out'} ${formatMoney(raw)} ${amount > 0 ? 'to' : 'from'} ${a.name}`);
+      if (amount > 0) warnOverLimit(a);
+    } catch (e) {
+      showToast("Couldn't save — check your connection");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  document.getElementById('deleteTransfer').addEventListener('click', async () => {
+    if (!editingTransferId) return;
+    const id = editingTransferId;
+    if (!(await askConfirm('Delete this transfer?', 'It will come off the account balance and your pay period.', 'Delete', true))) return;
+    try {
+      await deleteRow('transfers', id);
+      transfers = transfers.filter(t => t.id !== id);
+      render();
+      closeTransferSheet();
+      if (accountHistoryOverlay.classList.contains('open')) openAccountHistory(historyAccountId);
+      showToast('Transfer deleted');
+    } catch (e) {
+      showToast("Couldn't delete — check your connection");
+    }
+  });
+
+  // ---------- Savings account history sheet ----------
+  // Transfers and balance updates, newest first, with the balance over time above them.
+  const accountHistoryOverlay = document.getElementById('accountHistoryOverlay');
+  const accountHistoryList = document.getElementById('accountHistoryList');
+  const accountHistoryChart = document.getElementById('accountHistoryChart');
+  let historyAccountId = null;
+
+  function openAccountHistory(id) {
+    historyAccountId = id;
+    const a = accounts.find(x => x.id === id);
+    const info = accountInfo(a);
+    document.getElementById('accountHistoryName').textContent = a.name;
+    const depositGoal = new Map(allDeposits.map(d => [d.id, goals.find(g => g.id === d.goalId)]));
+    const interestAt = new Map(info.interest.map(i => [i.date.getTime(), i.amount]));
+    const rows = [
+      ...transfers.filter(t => t.accountId === id).map(t => ({ time: transferTime(t), t })),
+      ...accountEntries.filter(e => e.accountId === id).map(e => ({ time: new Date(e.createdAt), e }))
+    ].sort((x, y) => y.time - x.time);
+
+    const points = rows.slice().reverse().map(r => ({
+      x: r.time, y: info.balanceAt(r.time),
+      tip: `<div class="tip-title">${formatDate(r.time.toISOString())}</div><div class="tip-row"><span>Balance</span><b>${formatMoney(info.balanceAt(r.time))}</b></div>`
+    }));
+    if (points.length >= 2) {
+      mountChart(accountHistoryChart, { kind: 'line', points, height: 140, label: `${a.name} balance over time, now ${formatMoney(info.balance)}` });
+    } else {
+      clearChart(accountHistoryChart);
+    }
+
+    accountHistoryList.innerHTML = rows.length === 0 ? '<div class="history-empty">Nothing yet.</div>' : rows.map(r => {
+      if (r.t) {
+        const goal = r.t.depositId && depositGoal.get(r.t.depositId);
+        const what = goal ? `for ${escapeHtml(goal.name)}` : r.t.dueDate ? 'standing order' : r.t.amount > 0 ? 'from current account' : 'back to current account';
+        return `
+          <div class="history-item">
+            <div class="history-main">
+              <div class="amt ${r.t.amount < 0 ? 'negative' : ''}">${r.t.amount > 0 ? '+' : ''}${formatMoney(r.t.amount)}</div>
+              <div class="meta">${shortDate(parseLocalDate(r.t.movedOn))} · ${what}${r.t.note && !goal && r.t.note !== 'Standing order' ? ' · ' + escapeHtml(r.t.note) : ''}</div>
+            </div>
+            ${goal ? '' : `<button class="btn-icon edit-transfer" data-id="${r.t.id}">edit</button>`}
+          </div>`;
+      }
+      const interest = interestAt.get(r.time.getTime());
+      return `
+        <div class="history-item">
+          <div class="history-main">
+            <div class="amt">${formatMoney(r.e.amount)}</div>
+            <div class="meta">${formatDate(r.e.createdAt)} · balance entered${interest ? ` · ${formatMoney(interest)} interest` : ''}</div>
+          </div>
+          <button class="btn-icon delete-entry" data-id="${r.e.id}">delete</button>
+        </div>`;
+    }).join('');
+    accountHistoryList.querySelectorAll('.edit-transfer').forEach(btn => btn.addEventListener('click', () => openTransferSheet(btn.dataset.id)));
+    accountHistoryList.querySelectorAll('.delete-entry').forEach(btn => btn.addEventListener('click', async () => {
+      if (!(await askConfirm('Delete this balance?', 'Interest is worked out again from the balances that are left.', 'Delete', true))) return;
+      try {
+        await deleteRow('account_balances', btn.dataset.id);
+        accountEntries = accountEntries.filter(e => e.id !== btn.dataset.id);
+        render();
+        openAccountHistory(id);
+      } catch (e) {
+        showToast("Couldn't delete — check your connection");
+      }
+    }));
+    accountHistoryOverlay.classList.add('open');
+  }
+
+  document.getElementById('closeAccountHistory').addEventListener('click', () => accountHistoryOverlay.classList.remove('open'));
+  accountHistoryOverlay.addEventListener('click', (e) => { if (e.target === accountHistoryOverlay) accountHistoryOverlay.classList.remove('open'); });
 
   // ---------- Skipping a month ----------
   async function skipGoal(btn) {
@@ -1777,9 +2524,20 @@
   }
   goalDateInput.addEventListener('input', syncGoalMonthlyField);
 
+  // Lists the live savings accounts (plus the goal's own, if it's been archived since). Hidden when there are none.
+  function fillGoalAccountSelect(goal) {
+    const select = document.getElementById('goalAccountInput');
+    const list = accounts.filter(a => !a.archived || (goal && a.id === goal.accountId));
+    document.getElementById('goalAccountField').style.display = accountsReady && list.length ? 'block' : 'none';
+    select.innerHTML = '<option value="">Not in a savings account</option>' +
+      list.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+    select.value = goal && goal.accountId ? goal.accountId : '';
+  }
+
   function openGoalSheet(id) {
     editingGoalId = id || null;
     refreshCategoryDatalist();
+    fillGoalAccountSelect(id ? goals.find(x => x.id === id) : null);
     if (id) {
       const g = goals.find(x => x.id === id);
       goalSheetTitle.textContent = 'Edit goal';
@@ -1824,15 +2582,20 @@
     const monthlyAmount = targetDate || !monthlyRaw ? null : parseFloat(monthlyRaw);
     if (monthlyAmount !== null && !(monthlyAmount > 0)) { showToast('Enter a monthly amount above £0'); return; }
 
+    const accountId = document.getElementById('goalAccountInput').value || null;
+
     const saveBtn = document.getElementById('saveGoal');
     saveBtn.disabled = true;
     try {
       if (editingGoalId) {
-        await updateGoalRemote(editingGoalId, { name, target, category: category || null, target_date: targetDate, monthly_amount: monthlyAmount });
+        const fields = { name, target, category: category || null, target_date: targetDate, monthly_amount: monthlyAmount };
+        if (accountsReady) fields.account_id = accountId;
+        await updateGoalRemote(editingGoalId, fields);
         const g = goals.find(x => x.id === editingGoalId);
         g.name = name; g.target = target; g.category = category; g.targetDate = targetDate; g.monthlyAmount = monthlyAmount;
+        if (accountsReady) g.accountId = accountId;
       } else {
-        const newGoal = await createGoalRemote(name, target, category, targetDate, monthlyAmount);
+        const newGoal = await createGoalRemote(name, target, category, targetDate, monthlyAmount, accountId);
         goals.push(newGoal);
       }
       render();
@@ -1856,6 +2619,9 @@
     try {
       await deleteGoalRemote(idToDelete);
       goals = goals.filter(g => g.id !== idToDelete);
+      // Money moved into a savings account by saving to it stays there, now unassigned (the database clears the link).
+      const gone = new Set(allDeposits.filter(d => d.goalId === idToDelete).map(d => d.id));
+      transfers.forEach(t => { if (gone.has(t.depositId)) t.depositId = null; });
       allDeposits = allDeposits.filter(d => d.goalId !== idToDelete);
       render();
       closeGoalSheet();
@@ -1872,28 +2638,82 @@
   const depositGoalName = document.getElementById('depositGoalName');
   const depositSheetTitle = document.getElementById('depositSheetTitle');
   const deleteDepositRow = document.getElementById('deleteDepositRow');
+  const depositHint = document.getElementById('depositHint');
+  const depositSourceField = document.getElementById('depositSourceField');
+  const depositSourceInput = document.getElementById('depositSourceInput');
+  const depositGoalField = document.getElementById('depositGoalField');
+  const depositGoalInput = document.getElementById('depositGoalInput');
+  const DEPOSIT_HINT = 'Enter a negative number to correct or withdraw.';
   let editingDepositOriginalAmount = 0;
+  let depositAssignOnly = false; // opened from an account's "Assign": no transfer, goal picked in the sheet
+
+  // For a goal kept in a savings account: did the money move from the current account (recorded as a
+  // transfer too), or is it already in the account and only being assigned to the goal?
+  function syncDepositSource(goal) {
+    const account = accountOf(goal);
+    depositSourceField.style.display = account && !depositAssignOnly ? 'block' : 'none';
+    if (!account) return;
+    const unassigned = accountInfo(account).unassigned;
+    depositSourceInput.innerHTML = `
+      <option value="move">Moved from current account to ${escapeHtml(account.name)}</option>
+      <option value="assign">Already in ${escapeHtml(account.name)}${unassigned > 0.005 ? ` (${formatMoney(unassigned)} unassigned)` : ''}</option>`;
+    depositSourceInput.value = 'move';
+  }
 
   function openDepositSheet(goalId) {
     depositGoalId = goalId;
     editingDepositId = null;
+    depositAssignOnly = false;
     const g = goals.find(x => x.id === goalId);
     depositSheetTitle.innerHTML = 'Add to <span id="depositGoalName">' + escapeHtml(g.name) + '</span>';
     depositAmountInput.value = '';
     depositNoteInput.value = '';
+    depositHint.textContent = DEPOSIT_HINT;
+    depositGoalField.style.display = 'none';
+    syncDepositSource(g);
     deleteDepositRow.style.display = 'none';
     depositOverlay.classList.add('open');
     setTimeout(() => depositAmountInput.focus(), 100);
   }
 
+  // Gives some of an account's unassigned money to one of its goals.
+  function openAssignSheet(accountId) {
+    const account = accounts.find(a => a.id === accountId);
+    const info = accountInfo(account);
+    const open = info.goalsIn.filter(g => !LedgerCore.isDone(g));
+    const choices = open.length ? open : info.goalsIn;
+    if (!choices.length) { showToast(`No goals kept in ${account.name} yet — edit a goal to choose it`); return; }
+    depositGoalId = choices[0].id;
+    editingDepositId = null;
+    depositAssignOnly = true;
+    depositSheetTitle.textContent = `Assign money in ${account.name}`;
+    depositGoalInput.innerHTML = choices.map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
+    depositGoalField.style.display = 'block';
+    depositAmountInput.value = info.unassigned > 0 ? Math.round(info.unassigned * 100) / 100 : '';
+    depositNoteInput.value = '';
+    depositHint.textContent = `${formatMoney(Math.max(0, info.unassigned))} isn't assigned to a goal. Nothing moves between accounts.`;
+    depositSourceField.style.display = 'none';
+    deleteDepositRow.style.display = 'none';
+    depositOverlay.classList.add('open');
+  }
+  depositGoalInput.addEventListener('change', () => { depositGoalId = depositGoalInput.value; });
+
   function openEditDepositSheet(dep, goalId) {
     depositGoalId = goalId;
     editingDepositId = dep.id;
+    depositAssignOnly = false;
     editingDepositOriginalAmount = dep.amount;
     const g = goals.find(x => x.id === goalId);
+    const linked = transfers.find(t => t.depositId === dep.id);
     depositSheetTitle.innerHTML = 'Edit entry — <span>' + escapeHtml(g.name) + '</span>';
     depositAmountInput.value = dep.amount;
     depositNoteInput.value = dep.note || '';
+    const linkedAccount = linked && accounts.find(a => a.id === linked.accountId);
+    depositHint.textContent = linked
+      ? `This also changes the ${formatMoney(Math.abs(linked.amount))} transfer ${linked.amount > 0 ? 'to' : 'from'} ${linkedAccount ? linkedAccount.name : 'savings'}.`
+      : DEPOSIT_HINT;
+    depositGoalField.style.display = 'none';
+    depositSourceField.style.display = 'none';
     deleteDepositRow.style.display = 'flex';
     depositOverlay.classList.add('open');
     setTimeout(() => depositAmountInput.focus(), 100);
@@ -1903,6 +2723,7 @@
     depositOverlay.classList.remove('open');
     depositGoalId = null;
     editingDepositId = null;
+    depositAssignOnly = false;
   }
 
   document.getElementById('cancelDeposit').addEventListener('click', closeDepositSheet);
@@ -1916,17 +2737,37 @@
     const saveBtn = document.getElementById('saveDeposit');
     saveBtn.disabled = true;
     // The database adjusts the goal's saved total itself whenever a deposit changes; mirror it locally.
+    const account = depositAssignOnly ? null : accountOf(g);
+    const move = account && depositSourceInput.value === 'move';
     try {
       if (editingDepositId) {
         await updateDepositRemote(editingDepositId, { amount, note: note || null });
         g.saved += amount - editingDepositOriginalAmount;
         const known = allDeposits.find(d => d.id === editingDepositId);
         if (known) Object.assign(known, { amount, note }); // a skip given an amount becomes a normal deposit
+        const linked = transfers.find(t => t.depositId === editingDepositId);
+        if (linked && linked.amount !== amount) {
+          await saveRow('transfers', linked.id, { amount });
+          linked.amount = amount;
+        }
         showToast('Entry updated');
       } else {
-        allDeposits.push(await createDepositRemote(g.id, amount, note));
+        const dep = await createDepositRemote(g.id, amount, note);
+        allDeposits.push(dep);
         g.saved += amount;
-        showToast(`${amount > 0 ? 'Added' : 'Adjusted'} ${formatMoney(amount)} — ${g.name}`);
+        if (move) {
+          try {
+            transfers.push(await createTransferRemote({
+              account_id: account.id, amount, moved_on: toISODate(startOfToday()), note: g.name, deposit_id: dep.id
+            }));
+          } catch (e) {
+            render();
+            closeDepositSheet();
+            showToast(`Saved to ${g.name}, but the move to ${account.name} didn't save — add it from the account`);
+            return;
+          }
+        }
+        showToast(`${amount > 0 ? 'Added' : 'Adjusted'} ${formatMoney(amount)} — ${g.name}${move ? ` · moved to ${account.name}` : ''}`);
       }
       render();
       closeDepositSheet();
@@ -1940,8 +2781,14 @@
   document.getElementById('deleteDeposit').addEventListener('click', async () => {
     if (!editingDepositId) return;
     const g = goals.find(x => x.id === depositGoalId);
-    if (!(await askConfirm('Delete this entry?', `It will be taken off ${g.name}'s saved total.`, 'Delete', true))) return;
+    const linked = transfers.find(t => t.depositId === editingDepositId);
+    if (!(await askConfirm('Delete this entry?', `It will be taken off ${g.name}'s saved total` +
+      (linked ? `, and the ${formatMoney(Math.abs(linked.amount))} transfer it made will be deleted too.` : '.'), 'Delete', true))) return;
     try {
+      if (linked) {
+        await deleteRow('transfers', linked.id);
+        transfers = transfers.filter(t => t !== linked);
+      }
       await deleteDepositRemote(editingDepositId);
       g.saved -= editingDepositOriginalAmount;
       allDeposits = allDeposits.filter(d => d.id !== editingDepositId);
@@ -1976,6 +2823,13 @@
     });
   }
 
+  // " · moved to Cash ISA" for an entry that also moved money between accounts.
+  function linkedNote(dep) {
+    const t = transfers.find(x => x.depositId === dep.id);
+    const a = t && accounts.find(x => x.id === t.accountId);
+    return a ? ` · ${t.amount > 0 ? 'moved to' : 'moved back from'} ${escapeHtml(a.name)}` : '';
+  }
+
   async function openHistorySheet(goalId) {
     historyGoalId = goalId;
     const g = goals.find(x => x.id === goalId);
@@ -1994,7 +2848,7 @@
         <div class="history-item" data-id="${d.id}">
           <div class="history-main">
             <div class="amt ${d.amount < 0 ? 'negative' : ''}">${d.amount === 0 ? 'Skipped' : (d.amount > 0 ? '+' : '') + formatMoney(d.amount)}</div>
-            <div class="meta">${formatDate(d.createdAt)}${d.note ? ' · ' + escapeHtml(d.note) : ''}</div>
+            <div class="meta">${formatDate(d.createdAt)}${d.note ? ' · ' + escapeHtml(d.note) : ''}${linkedNote(d)}</div>
           </div>
           <button class="btn-icon edit-deposit" data-id="${d.id}">edit</button>
         </div>
@@ -2320,9 +3174,9 @@
     const potMonthly = yearlyBillsPot(billsOnly, today).monthly;
 
     const leftOver = (pay ? pay.amount : 0) + otherTotal - periodBillsTotal - potMonthly;
-    // Goals: this period's plans, plus anything saved beyond them.
+    // Goals without a savings account: this period's plans, plus anything saved beyond them.
     let goalsMonthly = 0, goalsSaved = 0, skippedCount = 0;
-    liveGoals().forEach(g => {
+    liveGoals().filter(g => !accountOf(g)).forEach(g => {
       const plan = goalPlan(g);
       goalsMonthly += plan.committed;
       goalsSaved += Math.max(0, plan.savedThisPeriod);
@@ -2333,6 +3187,21 @@
       goalsSaved > 0 ? `${formatMoney(goalsSaved)} saved so far` : '',
       skippedCount ? `${skippedCount} skipped` : ''
     ].filter(Boolean).join(' · ');
+    // Savings accounts: what's been moved in this period, plus the standing order and goal money still to go.
+    const accountRows = liveAccounts().map(a => {
+      const info = accountInfo(a);
+      const s = accountSaving(a, period, info);
+      const goalNames = info.goalsIn.length === 1 ? info.goalsIn[0].name : 'goals';
+      const meta = [
+        Math.abs(s.moved) >= 0.005 ? `${formatMoney(s.moved)} moved in` : '',
+        s.standingLeft > 0 ? `${formatMoney(s.standingLeft)} standing order to go` : '',
+        s.extra > 0 ? `${formatMoney(s.extra)} still to save for ${escapeHtml(goalNames)}` : '',
+        s.extra > 0 && info.unassigned > 0.005 ? `or assign some of the ${formatMoney(info.unassigned)} unassigned` : ''
+      ].filter(Boolean).join(' · ') || 'nothing planned this month';
+      return { a, s, meta };
+    }).filter(r => r.s.committed > 0.005);
+    goalsMonthly += accountRows.reduce((t, r) => t + r.s.committed, 0);
+    const goalsOnlyMonthly = goalsMonthly - accountRows.reduce((t, r) => t + r.s.committed, 0);
     // Budgets: each allowance, or what's been spent if that's more.
     let budgetsCommitted = 0, budgetsSpent = 0;
     liveBudgets().forEach(b => {
@@ -2349,6 +3218,8 @@
     const live = liveGoals();
     const totalSaved = live.reduce((s, g) => s + g.saved, 0);
     const totalTarget = live.reduce((s, g) => s + g.target, 0);
+    const accountInfos = liveAccounts().map(a => ({ a, info: accountInfo(a) }));
+    const savingsTotal = accountInfos.reduce((s, x) => s + x.info.balance, 0);
     const stat = (lbl, num, meta, negative) =>
       `<div class="stat"><div class="lbl">${lbl}</div><div class="num ${negative ? 'negative' : ''}">${num}</div><div class="meta">${meta}</div></div>`;
     html += `<div class="stat-grid">
@@ -2358,9 +3229,11 @@
       ${stat('Payday in', `${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
         period.nextPayday.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))}
       ${income > 0
-        ? stat('Saving rate', `${Math.round((goalsMonthly / income) * 100)}%`, `of income going to goals`)
+        ? stat('Saving rate', `${Math.round((goalsMonthly / income) * 100)}%`, `of income going to ${liveAccounts().length ? 'savings' : 'goals'}`)
         : stat('Saving rate', '—', 'enter pay to see this')}
-      ${live.length
+      ${liveAccounts().length
+        ? stat('Savings', formatMoney(savingsTotal), `${formatMoney(totalSaved)} of it in goals`)
+        : live.length
         ? stat('Saved in goals', formatMoney(totalSaved), `${Math.round(Math.min(1, totalSaved / totalTarget) * 100)}% of ${formatMoney(totalTarget)}`)
         : stat('Saved in goals', formatMoney(0), 'no goals yet')}
     </div>`;
@@ -2396,7 +3269,7 @@
             <div class="amt">${amount > 0 ? '+' : '−'}${formatMoney(Math.abs(amount))}</div>
           </div>`;
         if (Math.abs(out.since) >= 0.005) {
-          html += row('Since then', 'bills, savings and spends logged after you entered it', out.since) + `
+          html += row('Since then', 'bills, transfers and spends logged after you entered it', out.since) + `
             <div class="statement-row total">
               <div>Estimated now</div>
               <div class="amt ${neg(fc.now)}">${formatMoney(fc.now)}</div>
@@ -2404,7 +3277,7 @@
         }
         html += row('Bills', 'still to come out', out.bills)
           + row('Income', 'still to come in', out.income)
-          + row('Goals', 'still to save this month', out.goals)
+          + row(liveAccounts().length ? 'Savings' : 'Goals', liveAccounts().length ? 'still to move to savings this month' : 'still to save this month', out.goals)
           + row('Budgets', 'left to spend', out.budgets) + `
           <div class="statement-row total">
             <div>Before payday<span class="meta">${shortDate(period.end)}, the day before pay</span></div>
@@ -2495,10 +3368,15 @@
           <div>Left over${pay ? '' : '<span class="meta">before pay is entered</span>'}</div>
           <div class="amt ${neg(leftOver)}">${formatMoney(leftOver)}</div>
         </div>
-        ${goalsMonthly > 0 ? `
+        ${accountRows.map(r => `
         <div class="statement-row">
-          <div>Goals<span class="meta">${goalsMeta}</span></div>
-          <div class="amt">−${formatMoney(goalsMonthly)}</div>
+          <div>${escapeHtml(r.a.name)}<span class="meta">${r.meta}</span></div>
+          <div class="amt">−${formatMoney(r.s.committed)}</div>
+        </div>`).join('')}
+        ${goalsOnlyMonthly > 0 ? `
+        <div class="statement-row">
+          <div>${accountRows.length ? 'Other goals' : 'Goals'}<span class="meta">${goalsMeta}</span></div>
+          <div class="amt">−${formatMoney(goalsOnlyMonthly)}</div>
         </div>` : ''}
         ${budgetsCommitted > 0 ? `
         <div class="statement-row">
@@ -2517,7 +3395,7 @@
     // This period's income split into bills, goals and budgets; the unfilled part of the bar is what's free.
     const parts = [
       { key: 'bills', name: potMonthly > 0 ? 'Bills & pot' : 'Bills', value: periodBillsTotal + potMonthly },
-      { key: 'goals', name: 'Goals', value: goalsMonthly },
+      { key: 'goals', name: liveAccounts().length ? 'Savings' : 'Goals', value: goalsMonthly },
       { key: 'budgets', name: 'Budgets', value: budgetsCommitted }
     ].filter(p => p.value > 0);
     const outgoing = parts.reduce((s, p) => s + p.value, 0);
@@ -2605,12 +3483,14 @@
     const items = [];
     billsOnly.forEach(b => unpaidBetween(b, period.start, period.end).forEach(d => items.push({ b, d, isIncome: false })));
     otherItems.filter(i => i.d >= today).forEach(i => items.push({ ...i, isIncome: true }));
+    liveAccounts().forEach(a => standingBetween(a, period.start, period.end).filter(d => !standingDone(a, d))
+      .forEach(d => items.push({ b: { id: a.id, name: `${a.name} standing order`, amount: a.standingAmount }, d, isStanding: true })));
     items.sort((x, y) => x.d - y.d);
 
     html += `<h3 class="section-title">Coming up <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">next payday ${shortDate(period.nextPayday)}</span></h3><div class="statement">`;
     html += items.length === 0
       ? '<div class="statement-empty">Nothing left unpaid this period.</div>'
-      : items.map(({ b, d, isIncome }) => {
+      : items.map(({ b, d, isIncome, isStanding }) => {
         const overdue = !isIncome && d < today;
         const when = overdue
           ? `Overdue · ${shortDate(d)}`
@@ -2620,7 +3500,9 @@
             <div>${escapeHtml(b.name)}<span class="meta when ${overdue ? 'overdue' : ''}">${when}</span></div>
             <div class="row-end">
               <div class="amt">${isIncome ? '+' : ''}${formatMoney(b.amount)}</div>
-              ${isIncome ? '' : `<button class="btn-small mark-paid" data-id="${b.id}" data-date="${toISODate(d)}">Paid</button>`}
+              ${isIncome ? '' : isStanding
+                ? `<button class="btn-small standing-done" data-id="${b.id}" data-date="${toISODate(d)}">Done</button>`
+                : `<button class="btn-small mark-paid" data-id="${b.id}" data-date="${toISODate(d)}">Paid</button>`}
             </div>
           </div>
         `;
@@ -2634,14 +3516,29 @@
       .sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
     const goalName = new Map(live.map(g => [g.id, g.name]));
     let running = totalSaved - goalDeposits.reduce((s, d) => s + d.amount, 0);
-    const savingsPoints = goalDeposits.map(d => {
+    let savingsPoints = goalDeposits.map(d => {
       running += d.amount;
       return { x: new Date(d.createdAt), y: running, tip: `<div class="tip-title">${formatDate(d.createdAt)}</div>
         <div class="tip-row"><span>${escapeHtml(goalName.get(d.goalId))}</span><b>${d.amount > 0 ? '+' : '−'}${formatMoney(Math.abs(d.amount))}</b></div>
         <div class="tip-row"><span>All goals</span><b>${formatMoney(running)}</b></div>` };
     });
+    // With savings accounts, chart their combined balance instead: a point at every transfer and balance update.
+    if (accountInfos.length) {
+      const ids = new Set(accountInfos.map(x => x.a.id));
+      const times = [
+        ...transfers.filter(t => ids.has(t.accountId)).map(transferTime),
+        ...accountEntries.filter(e => ids.has(e.accountId)).map(e => new Date(e.createdAt))
+      ].sort((x, y) => x - y);
+      savingsPoints = times.map(t => {
+        const each = accountInfos.map(x => ({ name: x.a.name, v: x.info.balanceAt(t) }));
+        const sum = each.reduce((s, x) => s + x.v, 0);
+        return { x: t, y: sum, tip: `<div class="tip-title">${formatDate(t.toISOString())}</div>` +
+          each.map(x => `<div class="tip-row"><span>${escapeHtml(x.name)}</span><b>${formatMoney(x.v)}</b></div>`).join('') +
+          (each.length > 1 ? `<div class="tip-row"><span>All accounts</span><b>${formatMoney(sum)}</b></div>` : '') };
+      });
+    }
     if (savingsPoints.length >= 2) {
-      html += `<h3 class="section-title">Savings over time <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">all current goals</span></h3>
+      html += `<h3 class="section-title">Savings over time <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${accountInfos.length ? 'all savings accounts' : 'all current goals'}</span></h3>
         <div class="statement chart-box"><div class="chart" id="savingsChart"></div></div>`;
     }
 
@@ -2690,10 +3587,10 @@
       seg.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideTip(); });
     });
     if (savingsPoints.length >= 2) {
-      mountChart(document.getElementById('savingsChart'), {
-        kind: 'line', points: savingsPoints, target: totalTarget, height: 150,
-        label: `Saved across all goals over time, now ${formatMoney(totalSaved)} of ${formatMoney(totalTarget)}`
-      });
+      mountChart(document.getElementById('savingsChart'), accountInfos.length
+        ? { kind: 'line', points: savingsPoints, height: 150, label: `Savings accounts over time, now ${formatMoney(savingsTotal)}` }
+        : { kind: 'line', points: savingsPoints, target: totalTarget, height: 150,
+            label: `Saved across all goals over time, now ${formatMoney(totalSaved)} of ${formatMoney(totalTarget)}` });
     }
     if (balancePoints.length >= 2) {
       mountChart(document.getElementById('balanceChart'), {
@@ -2722,6 +3619,7 @@
       depositAmountInput.value = btn.dataset.amount;
     }));
     el.querySelectorAll('.mark-paid').forEach(btn => btn.addEventListener('click', () => markPaid(btn)));
+    el.querySelectorAll('.standing-done').forEach(btn => btn.addEventListener('click', () => markStandingDone(btn)));
     el.querySelectorAll('.edit-bill').forEach(btn => btn.addEventListener('click', () => openBillSheet(btn.dataset.id)));
     el.querySelectorAll('.add-pay').forEach(btn => btn.addEventListener('click', () => openPaySheet(null, btn.dataset.date)));
     el.querySelectorAll('.edit-pay').forEach(btn => btn.addEventListener('click', () => openPaySheet(btn.dataset.id)));
@@ -3669,7 +4567,7 @@
     document.getElementById('billList').innerHTML = '<div class="empty">Loading your bills…</div>';
     document.getElementById('budgetList').innerHTML = '<div class="empty">Loading your budgets…</div>';
     document.getElementById('overviewContent').innerHTML = '<div class="empty">Loading…</div>';
-    await Promise.all([loadGoals(), loadBills(), loadPayments(), loadAllDeposits(), loadBudgets(), loadPeriodSpends(), loadBalances()]);
+    await Promise.all([loadGoals(), loadBills(), loadPayments(), loadAllDeposits(), loadBudgets(), loadPeriodSpends(), loadBalances(), loadAccounts()]);
     render();
   }
 
@@ -3688,6 +4586,10 @@
     periodSpends = [];
     pastSpends = [];
     balances = [];
+    accounts = [];
+    accountEntries = [];
+    transfers = [];
+    accountsReady = false;
   }
 
   // Supabase reports INITIAL_SESSION on load and SIGNED_IN / SIGNED_OUT after, but also TOKEN_REFRESHED

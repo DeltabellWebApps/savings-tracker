@@ -262,7 +262,87 @@
     return null;
   }
 
+  // ---------- Savings accounts ----------
+  // Money is moved from the current account into a savings account (a transfer), and goals then claim some
+  // of what's in there. Balances are entered by hand now and then; whatever they moved by beyond the transfers
+  // in between is interest.
+  const ISA_ALLOWANCE = 20000;
+  const PERSONAL_SAVINGS_ALLOWANCE = 1000; // basic-rate taxpayers; £500 for higher rate
+
+  // The UK tax year starts on 6 April.
+  function taxYearStart(date) {
+    const afterStart = date.getMonth() > 3 || (date.getMonth() === 3 && date.getDate() >= 6);
+    return new Date(afterStart ? date.getFullYear() : date.getFullYear() - 1, 3, 6);
+  }
+
+  // An account's monthly standing order in, shaped like a bill so the bill schedule rules apply.
+  // It stops when the account matures.
+  function standingOrder(account) {
+    if (!account.standingAmount || !account.standingStart) return null;
+    return {
+      id: account.id, name: account.name, amount: account.standingAmount, frequency: 'monthly',
+      startDate: account.standingStart, endDate: account.maturesOn || null, createdAt: account.createdAt
+    };
+  }
+
+  // When a transfer happened, for comparing with balance entries. One logged on the day it's dated keeps the
+  // time it was logged; a backdated one counts from the start of its date.
+  function transferTime(t) {
+    const logged = new Date(t.createdAt);
+    return toISODate(logged) === t.movedOn ? logged : parseLocalDate(t.movedOn);
+  }
+
+  // Everything about one account, from its balance entries and transfers (either list may hold other accounts').
+  //   balance    — the latest entry plus transfers since; just the transfers if there's no entry
+  //   interest   — [{ date, amount }] per entry after the first
+  //   interestThisYear, paidInThisYear, takenOutThisYear — this tax year
+  //   isaUsed    — ISA allowance used this tax year (a flexible ISA gets withdrawals back)
+  //   paidInThisMonth — this calendar month, for a regular saver's monthly limit
+  //   balanceAt(date) — the balance at any time, worked back from the first entry before it
+  function accountState(account, entries, transfers, today) {
+    const mine = entries.filter(e => e.accountId === account.id)
+      .map(e => ({ ...e, time: new Date(e.createdAt) })).sort((a, b) => a.time - b.time);
+    const moves = transfers.filter(t => t.accountId === account.id)
+      .map(t => ({ ...t, time: transferTime(t) })).sort((a, b) => a.time - b.time);
+    const movedBetween = (from, to) => moves
+      .filter(t => (!from || t.time > from) && (!to || t.time <= to)).reduce((s, t) => s + t.amount, 0);
+
+    function balanceAt(date) {
+      const before = mine.filter(e => e.time <= date).pop();
+      if (before) return before.amount + movedBetween(before.time, date);
+      if (mine.length) return mine[0].amount - movedBetween(date, mine[0].time);
+      return movedBetween(null, date);
+    }
+
+    const interest = [];
+    for (let i = 1; i < mine.length; i++) {
+      const amount = mine[i].amount - mine[i - 1].amount - movedBetween(mine[i - 1].time, mine[i].time);
+      if (Math.abs(amount) >= 0.005) interest.push({ date: mine[i].time, amount });
+    }
+
+    const yearStart = taxYearStart(today);
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const thisYear = moves.filter(t => parseLocalDate(t.movedOn) >= yearStart);
+    const paidInThisYear = thisYear.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    const takenOutThisYear = -thisYear.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0);
+    const latest = mine[mine.length - 1] || null;
+
+    return {
+      balance: latest ? latest.amount + movedBetween(latest.time, null) : movedBetween(null, null),
+      latestEntry: latest,
+      interest,
+      interestThisYear: interest.filter(i => i.date >= yearStart).reduce((s, i) => s + i.amount, 0),
+      paidInThisYear,
+      takenOutThisYear,
+      isaUsed: account.flexible ? Math.max(0, paidInThisYear - takenOutThisYear) : paidInThisYear,
+      paidInThisMonth: moves.filter(t => t.amount > 0 && parseLocalDate(t.movedOn) >= monthStart)
+        .reduce((s, t) => s + t.amount, 0),
+      balanceAt
+    };
+  }
+
   return {
+    ISA_ALLOWANCE, PERSONAL_SAVINGS_ALLOWANCE, taxYearStart, standingOrder, transferTime, accountState,
     FREQUENCY_LABELS, PER_MONTH, AVG_MONTH_MS,
     parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth, monthShort,
     occurrence, occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage,

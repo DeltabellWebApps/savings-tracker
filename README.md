@@ -10,7 +10,7 @@ Live at <https://deltabellwebapps.github.io/savings-tracker/>.
 | Path | What it is |
 |---|---|
 | `index.html` | The whole web app: markup, styles and script. Four tabs: Overview, Goals, Bills, Budgets. |
-| `ledger-core.js` | The app's core rules: dates, bill schedules, pay periods, the yearly bills pot, money formatting, goal plans and projections. The app needs it to load. |
+| `ledger-core.js` | The app's core rules: dates, bill schedules, pay periods, the yearly bills pot, money formatting, goal plans and projections, savings account balances, interest and allowances. The app needs it to load. |
 | `supabase/` | SQL migrations, run by hand in the Supabase SQL editor. |
 
 There's no build step. GitHub Pages serves the files as they are.
@@ -37,16 +37,32 @@ There's no build step. GitHub Pages serves the files as they are.
 - **Goals** have either a target date (the app works out the monthly amount) or a fixed monthly amount.
   A £0 deposit marks a month as skipped. Each goal shows a projection: ahead of or behind a steady pace for
   dated goals, or an estimated finish month for the others.
+- **Savings accounts** (regular saver, cash ISA, other) are listed at the top of the Goals tab. Money gets there
+  by a **transfer** from the current account (or back again), and each goal can say which account its money is
+  kept in. Saving to such a goal asks whether the money was moved from the current account (recorded as a
+  transfer too, linked to the goal entry) or was already in the account (only assigned). Anything in an account
+  that no goal claims shows as *unassigned*, with an "Assign" button. Balances are entered by hand now and then;
+  any change beyond the transfers in between counts as interest. Also per account:
+  - a monthly standing order in, which shows in "Coming up" with a "Done" button and stops at maturity
+  - for an ISA, the £20,000 allowance used this tax year (from 6 April); a flexible ISA gets withdrawals back
+  - for a regular saver, the monthly limit (per calendar month) and the maturity date, with a warning in the last 30 days
+
+  Interest outside ISAs is shown against the £1,000 Personal Savings Allowance. The rules are in
+  `accountState()` in `ledger-core.js` and `accountSaving()` in `index.html`.
 - **Budgets** are monthly allowances (e.g. Groceries £300). They reset each payday, and spends are logged against them.
   The Budgets tab charts spending per pay period over the last six (all budgets, or one you tap), and each
   budget's average over the finished ones against its allowance. Past periods use today's allowances.
-- **Overview.** Pay + other income − bills − the yearly bills pot = *left over*. Then subtract goals and budgets (each one's plan, or
-  more if you've gone over it) to get *free to spend*.
+- **Overview.** Pay + other income − bills − the yearly bills pot = *left over*. Then subtract savings and budgets
+  (each one's plan, or more if you've gone over it) to get *free to spend*. Savings are one row per account:
+  what's been moved in this period, plus the standing order still to go, plus whatever its goals still want
+  beyond that. Money that was already in the account only counts towards a goal once it's assigned. Goals with
+  no account are one "Goals" row, as before.
 - **Bank balance.** You enter your current account balance by hand (a second update on the same day replaces
   that day's). The Overview carries it forward to the day before payday: bills still to come out, income still to
-  come in, what's left to save for goals this month, and what's left in budgets (spread evenly over the days left).
-  It assumes goal money goes to a separate savings account. Anything marked paid, saved or spent after you
-  entered the balance comes off too. It also shows the lowest point before payday, warns if you'd go overdrawn,
+  come in, savings still to move this month (standing orders on their dates), and what's left in budgets
+  (spread evenly over the days left). Transfers to and from savings accounts move it; assigning money that's
+  already in an account doesn't. For goals with no account, deposits are assumed to leave the current account.
+  Anything marked paid, moved or spent after you entered the balance comes off too. It also shows the lowest point before payday, warns if you'd go overdrawn,
   and suggests how much you could move to a goal (one that's behind schedule first) without going below £0.
   The rules are in `balanceOutlook()` in `index.html` and `balanceForecast()` in `ledger-core.js`.
 - **Archiving** hides a goal, bill, income source or budget from every list, total and chart without
@@ -68,6 +84,11 @@ Row-level security limits each user to their own rows.
 | `budgets` | `name`, `amount`, `sort_order`, `archived` | Added in migration 001. |
 | `spends` | `budget_id`, `amount`, `note`, `spent_on` | Added in migration 001. Negative = refund. |
 | `balances` | `amount` | Added in migration 002. One row per balance update; the newest is the current one. Negative = overdrawn. |
+| `accounts` | `name`, `kind` (`saver` / `isa` / `other`), `standing_amount`, `standing_start`, `monthly_limit`, `matures_on`, `flexible`, `sort_order`, `archived` | Added in migration 003. Savings accounts; the current account isn't one. |
+| `account_balances` | `account_id`, `amount` | Added in migration 003. Savings account balances as entered. |
+| `transfers` | `account_id`, `amount`, `moved_on`, `note`, `deposit_id`, `due_date` | Added in migration 003. Positive = into savings. `deposit_id` links one made by saving to a goal; `due_date` marks a standing order occurrence. |
+
+Migration 003 also adds `goals.account_id`, the account a goal's money is kept in.
 
 The first four tables were created in the Supabase dashboard. Their columns are listed above as the app uses them.
 
@@ -83,6 +104,8 @@ Deploy the matching app code only *after* running the migration.
 
   The file also has an optional query that checks whether any goal's total has drifted from its deposit history.
 - `002_balances.sql` creates `balances` for the bank balance on the Overview.
+- `003_accounts_transfers.sql` creates `accounts`, `account_balances` and `transfers`, and adds `goals.account_id`.
+  Until it's run the app works as before, with savings accounts hidden.
 
 ### Auth (email + password, and magic links)
 
