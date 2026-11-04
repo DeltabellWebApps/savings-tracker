@@ -90,14 +90,52 @@
       .reduce((s, b) => s + b.amount * PER_MONTH[b.frequency], 0);
   }
 
+  // ---------- Yearly bills pot ----------
+  // Yearly and quarterly bills land in one go, so their money is put aside a month at a time instead.
+  // For each one still running (`list` should already leave out archived bills and income):
+  //   monthly    — its share per month (a twelfth, or a third for quarterly)
+  //   shouldHave — what should be put by today: its share of the time since the last due date (or, before the
+  //                first one, since one cycle before it), so it reaches the full amount on the due date
+  const POT_FREQUENCIES = ['quarterly', 'yearly'];
+
+  function isPotBill(bill) {
+    return POT_FREQUENCIES.includes(bill.frequency);
+  }
+
+  function yearlyBillsPot(list, today) {
+    const items = [];
+    list.filter(b => isPotBill(b)).forEach(bill => {
+      const start = parseLocalDate(bill.startDate);
+      const end = bill.endDate ? parseLocalDate(bill.endDate) : null;
+      let n = 0;
+      while (occurrence(start, bill.frequency, n) < today) n++;
+      const next = occurrence(start, bill.frequency, n);
+      if (end && next > end) return;
+      const prev = occurrence(start, bill.frequency, n - 1);
+      const share = Math.min(1, Math.max(0, (today - prev) / (next - prev)));
+      items.push({ bill, next, monthly: bill.amount * PER_MONTH[bill.frequency], shouldHave: bill.amount * share });
+    });
+    items.sort((x, y) => x.next - y.next);
+    return {
+      items,
+      monthly: items.reduce((s, i) => s + i.monthly, 0),
+      shouldHave: items.reduce((s, i) => s + i.shouldHave, 0)
+    };
+  }
+
   // ---------- Pay period ----------
   // Pay lands on the last day of each month, so a period runs from one payday to the day before the next.
-  function currentPayPeriod() {
-    const today = startOfToday();
-    let start = lastDayOfMonth(today.getFullYear(), today.getMonth());
-    if (start > today) start = lastDayOfMonth(today.getFullYear(), today.getMonth() - 1);
+  // `back` steps that many periods into the past (1 = the previous period).
+  function payPeriodFor(date, back = 0) {
+    let start = lastDayOfMonth(date.getFullYear(), date.getMonth());
+    if (start > date) start = lastDayOfMonth(date.getFullYear(), date.getMonth() - 1);
+    if (back) start = lastDayOfMonth(start.getFullYear(), start.getMonth() - back);
     const nextPayday = lastDayOfMonth(start.getFullYear(), start.getMonth() + 1);
     return { start, end: addDays(nextPayday, -1), nextPayday };
+  }
+
+  function currentPayPeriod() {
+    return payPeriodFor(startOfToday());
   }
 
   // ---------- Balance forecast ----------
@@ -228,6 +266,6 @@
     FREQUENCY_LABELS, PER_MONTH, AVG_MONTH_MS,
     parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth, monthShort,
     occurrence, occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage,
-    currentPayPeriod, balanceForecast, formatMoney, pctOf, isDone, goalPlan
+    isPotBill, yearlyBillsPot, payPeriodFor, currentPayPeriod, balanceForecast, formatMoney, pctOf, isDone, goalPlan
   };
 });

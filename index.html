@@ -690,6 +690,7 @@
 
     <button class="add-goal-btn" id="openAddBudget">+ New budget</button>
     <div id="budgetArchive"></div>
+    <div id="budgetTrends"></div>
   </section>
 
   <nav class="tabbar">
@@ -989,6 +990,8 @@
   let budgetQuery = '';
   let budgets = [];
   let periodSpends = [];   // spends dated within this pay period
+  let pastSpends = [];     // spends from the previous BUDGET_HISTORY_PERIODS pay periods, for the by-month chart
+  let activeBudgetTrend = 'All';   // budget id the by-month chart shows, or 'All'
   let editingBudgetId = null;
   let spendBudgetId = null;
   let editingSpendId = null;
@@ -998,7 +1001,8 @@
 
   const {
     FREQUENCY_LABELS, parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth,
-    occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage, currentPayPeriod, balanceForecast, formatMoney
+    occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage, currentPayPeriod, balanceForecast, formatMoney,
+    PER_MONTH, isPotBill, yearlyBillsPot, payPeriodFor
   } = LedgerCore;
 
   // ---------- Mapping ----------
@@ -1210,13 +1214,21 @@
     }
   }
 
+  // This pay period's spends, plus the previous few periods' for the budgets by-month chart.
+  const BUDGET_HISTORY_PERIODS = 5;
+
   async function loadPeriodSpends() {
+    const from = toISODate(payPeriodFor(startOfToday(), BUDGET_HISTORY_PERIODS).start);
+    const periodStart = toISODate(currentPayPeriod().start);
     try {
-      const { data, error } = await sb.from('spends').select('*').gte('spent_on', toISODate(currentPayPeriod().start));
+      const { data, error } = await sb.from('spends').select('*').gte('spent_on', from);
       if (error) throw error;
-      periodSpends = data.map(fromSpendRow);
+      const all = data.map(fromSpendRow);
+      periodSpends = all.filter(s => s.spentOn >= periodStart);
+      pastSpends = all.filter(s => s.spentOn < periodStart);
     } catch (e) {
       periodSpends = [];
+      pastSpends = [];
     }
   }
 
@@ -2043,7 +2055,7 @@
     totalsEl.innerHTML = `
       <div class="item">
         <div class="num">${formatMoney(monthly)}</div>
-        <div class="lbl">a month, on average${scope}</div>
+        <div class="lbl">a month, on average${scope} · ${formatMoney(monthly * 12)} a year</div>
       </div>
       <div class="item">
         <div class="num">${formatMoney(outstanding)}</div>
@@ -2069,6 +2081,8 @@
       const left = due && b.endDate && b.frequency !== 'once' ? unpaidBetween(b, due, parseLocalDate(b.endDate)).length : 0;
       const hasPayments = payments.some(p => p.billId === b.id);
       const dueISO = due ? toISODate(due) : '';
+      // What a recurring bill costs over a year, unless it's finished. Not shown for yearly ones, where it's the amount.
+      const yearly = due && b.frequency !== 'once' && b.frequency !== 'yearly' ? ` · ${formatMoney(b.amount * PER_MONTH[b.frequency] * 12)} a year` : '';
       return `
         <div class="goal ${soon ? 'soon' : ''} ${overdue ? 'overdue' : ''} ${!due ? 'past' : ''}">
           <div class="goal-head">
@@ -2079,7 +2093,7 @@
           </div>
           ${b.category ? `<div class="badge-category">${escapeHtml(b.category)}</div>` : ''}
           <div class="bill-foot">
-            <div class="bill-due">${FREQUENCY_LABELS[b.frequency]} · ${status}${left ? ` · ${left} left` : ''}</div>
+            <div class="bill-due">${FREQUENCY_LABELS[b.frequency]} · ${status}${left ? ` · ${left} left` : ''}${yearly}</div>
             <div class="bill-amount">${formatMoney(b.amount)}</div>
           </div>
           <div class="bill-actions">
@@ -2169,18 +2183,38 @@
       .filter(c => c.monthly > 0).sort((x, y) => y.monthly - x.monthly);
     const maxCat = cats.length ? cats[0].monthly : 0;
 
-    el.innerHTML = `
+    // Yearly and quarterly bills: what to put aside each month so each one is covered when it lands.
+    const pot = yearlyBillsPot(billsOnly, today);
+    const potHtml = pot.items.length ? `
+      <h3 class="section-title">Yearly bills pot <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">yearly &amp; quarterly</span></h3>
+      <div class="statement">
+        <div class="statement-row total">
+          <div>Put aside each month<span class="meta">counted in your pay period, instead of these bills landing all at once</span></div>
+          <div class="amt">${formatMoney(pot.monthly)}</div>
+        </div>
+        ${pot.items.map(i => `
+        <div class="statement-row">
+          <div>${escapeHtml(i.bill.name)}<span class="meta">${FREQUENCY_LABELS[i.bill.frequency]} · ${formatMoney(i.bill.amount)} due ${shortDate(i.next)} · ${formatMoney(i.monthly)} a month</span></div>
+          <div class="amt">${formatMoney(i.shouldHave)}</div>
+        </div>`).join('')}
+        <div class="statement-row total">
+          <div>Should have put by now<span class="meta">so each bill is fully covered on its due date</span></div>
+          <div class="amt">${formatMoney(pot.shouldHave)}</div>
+        </div>
+      </div>` : '';
+
+    el.innerHTML = potHtml + `
       <h3 class="section-title">By month</h3>
       <div class="statement chart-box">
         <div class="chart-legend"><span><span class="key"></span>Past</span><span><span class="key faded"></span>This month on, expected</span></div>
         <div class="chart" id="billMonthChart"></div>
       </div>
       ${cats.length > 1 ? `
-      <h3 class="section-title">By category <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">a month, on average</span></h3>
+      <h3 class="section-title">By category <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">a month on average, and a year</span></h3>
       <div class="statement">
         ${cats.map(c => `
           <div class="cat-row ${c.cat === activeBillCategory ? 'active' : ''}" data-cat="${escapeHtml(c.cat)}" role="button" tabindex="0">
-            <div class="cat-head"><span>${escapeHtml(c.cat)}</span><span class="amt">${formatMoney(c.monthly)}</span></div>
+            <div class="cat-head"><span>${escapeHtml(c.cat)}</span><span class="amt">${formatMoney(c.monthly)} <span style="color: var(--ink-soft);">· ${formatMoney(c.monthly * 12)}</span></span></div>
             <div class="bar-track"><div class="bar-fill" style="width:${(c.monthly / maxCat) * 100}%"></div></div>
           </div>`).join('')}
       </div>` : ''}
@@ -2273,15 +2307,19 @@
     otherIncome.forEach(b => occurrencesBetween(b, period.start, period.end).forEach(d => otherItems.push({ b, d })));
     const otherTotal = otherItems.reduce((s, i) => s + i.b.amount, 0);
 
-    let periodBillsTotal = 0;
+    // Yearly and quarterly bills don't count when they land; their monthly share (the pot) counts every period.
+    let periodBillsTotal = 0, potLumpTotal = 0, potLumpCount = 0;
     billsOnly.forEach(b => {
       occurrencesBetween(b, period.start, period.end).forEach(d => {
         const p = paymentFor(b, d);
-        periodBillsTotal += p ? p.amount : b.amount;
+        const amt = p ? p.amount : b.amount;
+        if (isPotBill(b)) { potLumpTotal += amt; potLumpCount++; }
+        else periodBillsTotal += amt;
       });
     });
+    const potMonthly = yearlyBillsPot(billsOnly, today).monthly;
 
-    const leftOver = (pay ? pay.amount : 0) + otherTotal - periodBillsTotal;
+    const leftOver = (pay ? pay.amount : 0) + otherTotal - periodBillsTotal - potMonthly;
     // Goals: this period's plans, plus anything saved beyond them.
     let goalsMonthly = 0, goalsSaved = 0, skippedCount = 0;
     liveGoals().forEach(g => {
@@ -2445,9 +2483,14 @@
         </div>
         ${otherIncomeRows}
         <div class="statement-row">
-          <div>Bills<span class="meta">due this period</span></div>
+          <div>Bills<span class="meta">due this period${potLumpCount && potMonthly > 0 ? ` · not counting ${formatMoney(potLumpTotal)} of yearly bills, paid from the pot` : ''}</span></div>
           <div class="amt">−${formatMoney(periodBillsTotal)}</div>
         </div>
+        ${potMonthly > 0 ? `
+        <div class="statement-row">
+          <div>Yearly bills pot<span class="meta">put aside this month for yearly &amp; quarterly bills</span></div>
+          <div class="amt">−${formatMoney(potMonthly)}</div>
+        </div>` : ''}
         <div class="statement-row total">
           <div>Left over${pay ? '' : '<span class="meta">before pay is entered</span>'}</div>
           <div class="amt ${neg(leftOver)}">${formatMoney(leftOver)}</div>
@@ -2473,7 +2516,7 @@
     // ---------- Where the money goes ----------
     // This period's income split into bills, goals and budgets; the unfilled part of the bar is what's free.
     const parts = [
-      { key: 'bills', name: 'Bills', value: periodBillsTotal },
+      { key: 'bills', name: potMonthly > 0 ? 'Bills & pot' : 'Bills', value: periodBillsTotal + potMonthly },
       { key: 'goals', name: 'Goals', value: goalsMonthly },
       { key: 'budgets', name: 'Budgets', value: budgetsCommitted }
     ].filter(p => p.value > 0);
@@ -2978,6 +3021,8 @@
       id: b.id, name: b.name, meta: 'Budget', amount: `${formatMoney(b.amount)}/mo`
     })), 'budgets');
 
+    renderBudgetTrends(live);
+
     if (live.length === 0) {
       list.innerHTML = '<div class="empty"><div class="big">No budgets yet</div>Tap "New budget" to give yourself a monthly allowance for things like groceries or eating out.</div>';
       totalsEl.style.display = 'none';
@@ -3036,6 +3081,96 @@
     list.querySelectorAll('.edit-budget').forEach(btn => btn.addEventListener('click', () => openBudgetSheet(btn.dataset.id)));
     list.querySelectorAll('.add-spend').forEach(btn => btn.addEventListener('click', () => openSpendSheet(btn.dataset.id, null)));
     list.querySelectorAll('.spend-history').forEach(btn => btn.addEventListener('click', () => openSpendHistory(btn.dataset.id)));
+  }
+
+  // ---------- Budget trends ----------
+  // Spending per pay period over the last few periods, against the allowance, for all budgets or one picked
+  // from the list below the chart. Uses each budget's current allowance; periods before the earliest budget
+  // was made are left off.
+  function renderBudgetTrends(live) {
+    const el = document.getElementById('budgetTrends');
+    if (live.length === 0) { el.innerHTML = ''; return; }
+    if (activeBudgetTrend !== 'All' && !live.some(b => b.id === activeBudgetTrend)) activeBudgetTrend = 'All';
+    const today = startOfToday();
+    const dayOf = iso => { const d = new Date(iso); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+    const made = new Map(live.map(b => [b.id, dayOf(b.createdAt)]));
+    const earliest = Math.min(...made.values());
+
+    const periods = [];
+    for (let back = BUDGET_HISTORY_PERIODS; back >= 0; back--) {
+      const p = payPeriodFor(today, back);
+      if (back === 0 || p.end >= earliest) periods.push({ ...p, current: back === 0, from: toISODate(p.start), to: toISODate(p.end) });
+    }
+    const spends = pastSpends.concat(periodSpends);
+    const spentIn = (p, ids) => spends
+      .filter(s => ids.has(s.budgetId) && s.spentOn >= p.from && s.spentOn <= p.to)
+      .reduce((t, s) => t + s.amount, 0);
+
+    const picked = activeBudgetTrend === 'All' ? live : live.filter(b => b.id === activeBudgetTrend);
+    const ids = new Set(picked.map(b => b.id));
+    const allowance = picked.reduce((s, b) => s + b.amount, 0);
+    const monthName = p => p.end.toLocaleDateString('en-GB', { month: 'short' });
+
+    const columns = periods.map(p => {
+      const total = spentIn(p, ids);
+      const rows = picked.length > 1
+        ? picked.map(b => [b.name, spentIn(p, new Set([b.id]))]).filter(([, v]) => v).sort((x, y) => y[1] - x[1]).slice(0, 4)
+        : [];
+      return {
+        label: monthName(p),
+        value: Math.max(0, total),
+        faded: p.current,
+        current: p.current,
+        tip: `<div class="tip-title">${shortDate(p.start)} → ${shortDate(p.end)}${p.current ? ' · so far' : ''}</div>
+          <div class="tip-row"><span>Spent</span><b>${formatMoney(total)}</b></div>
+          <div class="tip-row"><span>Allowance</span><b>${formatMoney(allowance)}</b></div>
+          ${rows.map(([n, v]) => `<div class="tip-row"><span>${escapeHtml(n)}</span><b>${formatMoney(v)}</b></div>`).join('')}`
+      };
+    });
+
+    // Each budget's average over the finished periods since it was made, against its allowance.
+    const averages = live.map(b => {
+      const done = periods.filter(p => !p.current && p.end >= made.get(b.id));
+      const avg = done.length ? done.reduce((s, p) => s + spentIn(p, new Set([b.id])), 0) / done.length : null;
+      return { b, avg, months: done.length };
+    });
+    const avgLine = ({ b, avg, months }) => {
+      if (avg === null) return 'no full months yet';
+      const diff = avg - b.amount;
+      const vs = Math.abs(diff) < 0.5 ? 'right on budget'
+        : diff > 0 ? `<span style="color: var(--danger)">${formatMoney(diff)} over</span>` : `${formatMoney(-diff)} under`;
+      return `${formatMoney(avg)} on average over ${months} month${months === 1 ? '' : 's'} · ${vs}`;
+    };
+
+    const pickedName = activeBudgetTrend === 'All' ? 'all budgets' : escapeHtml(picked[0].name);
+    el.innerHTML = `
+      <h3 class="section-title">By month <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${pickedName}</span></h3>
+      <div class="statement chart-box">
+        <div class="chart-legend"><span><span class="key"></span>Spent</span><span><span class="key faded"></span>So far</span><span>— ${formatMoney(allowance)} allowance</span></div>
+        <div class="chart" id="budgetMonthChart"></div>
+      </div>
+      ${live.length > 1 || averages[0].avg !== null ? `
+      <h3 class="section-title">Compared with budget <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">tap one to chart it</span></h3>
+      <div class="statement">
+        ${averages.map(a => `
+          <div class="cat-row ${a.b.id === activeBudgetTrend ? 'active' : ''}" data-id="${a.b.id}" role="button" tabindex="0">
+            <div class="cat-head"><span>${escapeHtml(a.b.name)}</span><span class="amt">${formatMoney(a.b.amount)}/mo</span></div>
+            <div class="bill-due" style="padding-bottom: 2px;">${avgLine(a)}</div>
+          </div>`).join('')}
+      </div>` : ''}
+    `;
+    mountChart(document.getElementById('budgetMonthChart'), {
+      kind: 'columns', columns, target: allowance, height: 150,
+      label: `Budget spending by month for ${activeBudgetTrend === 'All' ? 'all budgets' : picked[0].name},${columns[0].label} to ${columns[columns.length - 1].label}, against a ${formatMoney(allowance)} allowance`
+    });
+    el.querySelectorAll('.cat-row').forEach(row => {
+      const pick = () => {
+        activeBudgetTrend = activeBudgetTrend === row.dataset.id ? 'All' : row.dataset.id;
+        renderBudgetTrends(liveBudgets());
+      };
+      row.addEventListener('click', pick);
+      row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    });
   }
 
   // ---------- Budget sheet ----------
@@ -3100,6 +3235,7 @@
       await deleteRow('budgets', idToDelete);
       budgets = budgets.filter(x => x.id !== idToDelete);
       periodSpends = periodSpends.filter(s => s.budgetId !== idToDelete);
+      pastSpends = pastSpends.filter(s => s.budgetId !== idToDelete);
       render();
       closeBudgetSheet();
       showToast('Budget deleted');
@@ -3136,10 +3272,16 @@
     editingSpendId = null;
   }
 
-  // Keeps periodSpends to the entries dated in this pay period.
+  // Keeps periodSpends to the entries dated in this pay period, and pastSpends to the chart's earlier periods.
   function syncPeriodSpend(spend) {
-    periodSpends = periodSpends.filter(s => s.id !== spend.id);
+    dropSpend(spend.id);
     if (spend.spentOn >= toISODate(currentPayPeriod().start)) periodSpends.push(spend);
+    else if (spend.spentOn >= toISODate(payPeriodFor(startOfToday(), BUDGET_HISTORY_PERIODS).start)) pastSpends.push(spend);
+  }
+
+  function dropSpend(id) {
+    periodSpends = periodSpends.filter(s => s.id !== id);
+    pastSpends = pastSpends.filter(s => s.id !== id);
   }
 
   function afterSpendChange() {
@@ -3184,7 +3326,7 @@
     if (!(await askConfirm('Delete this entry?', 'It will be taken off what you\'ve spent.', 'Delete', true))) return;
     try {
       await deleteRow('spends', id);
-      periodSpends = periodSpends.filter(s => s.id !== id);
+      dropSpend(id);
       closeSpendSheet();
       afterSpendChange();
       showToast('Entry deleted');
@@ -3233,7 +3375,8 @@
   // ---------- Charts ----------
   // Small inline-SVG charts drawn at their container's real width, redrawn when it changes size
   // (including when a hidden tab is first shown). Hover or tap a mark for its tooltip.
-  //   columns: { kind: 'columns', columns: [{ label, value, faded?, current?, tip }], height, label }
+  //   columns: { kind: 'columns', columns: [{ label, value, faded?, current?, tip }], target?, height, label }
+  //            (target draws a flat reference line, e.g. a budget's allowance)
   //   line:    { kind: 'line', points: [{ x: Date, y, tip }], target?, height, label }
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const chartTip = document.getElementById('chartTip');
@@ -3319,8 +3462,11 @@
   function drawColumns(svg, spec, width, height) {
     const cols = spec.columns;
     const pad = { top: 8, right: 4, bottom: 20, left: 48 };
-    const max = Math.max(...cols.map(c => c.value), 0);
+    const max = Math.max(...cols.map(c => c.value), spec.target || 0, 0);
     const y = drawYAxis(svg, max, pad, width, height);
+    if (spec.target) {
+      svgEl('line', { class: 'target-line', x1: pad.left, x2: width - pad.right, y1: y(spec.target), y2: y(spec.target) }, svg);
+    }
     const band = (width - pad.left - pad.right) / cols.length;
     const barW = Math.min(24, band * 0.62);
     const labelEvery = band < 30 ? 2 : 1;
@@ -3540,6 +3686,7 @@
     allDeposits = [];
     budgets = [];
     periodSpends = [];
+    pastSpends = [];
     balances = [];
   }
 
