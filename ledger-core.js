@@ -1,5 +1,6 @@
-// Core rules for the Ledger web app: dates, bill schedules, pay periods, money formatting and goal plans.
-// index.html loads this with a <script> tag, as window.LedgerCore.
+// Core rules for Ledger: dates, bill schedules, pay periods, money formatting, goal plans, savings accounts, and
+// the Overview's sums (ledger()). Shared by the web app and the Scriptable widgets, so both work things out the same way.
+// index.html loads this with a <script> tag, as window.LedgerCore; Scriptable loads it with importModule('ledger-core').
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.LedgerCore = factory();
@@ -341,7 +342,274 @@
     };
   }
 
+  // ---------- Database rows ----------
+  // Supabase rows (snake_case) to the shapes the rules work with.
+  const num = v => v == null ? null : Number(v);
+  const fromRow = {
+    goal: r => ({
+      id: r.id, name: r.name, target: Number(r.target), saved: Number(r.saved), category: r.category || '',
+      targetDate: r.target_date || null, monthlyAmount: num(r.monthly_amount),
+      sortOrder: r.sort_order == null ? 0 : Number(r.sort_order), archived: !!r.archived,
+      accountId: r.account_id || null, createdAt: r.created_at
+    }),
+    deposit: r => ({ id: r.id, goalId: r.goal_id, amount: Number(r.amount), note: r.note || '', createdAt: r.created_at }),
+    bill: r => ({
+      id: r.id, name: r.name, amount: Number(r.amount), frequency: r.frequency, startDate: r.start_date,
+      endDate: r.end_date || null, kind: r.kind || 'bill', category: r.category || '', archived: !!r.archived,
+      createdAt: r.created_at
+    }),
+    payment: r => ({ id: r.id, billId: r.bill_id, dueDate: r.due_date, amount: Number(r.amount), paidAt: r.paid_at }),
+    budget: r => ({
+      id: r.id, name: r.name, amount: Number(r.amount), sortOrder: r.sort_order == null ? 0 : Number(r.sort_order),
+      archived: !!r.archived, createdAt: r.created_at
+    }),
+    spend: r => ({ id: r.id, budgetId: r.budget_id, amount: Number(r.amount), note: r.note || '', spentOn: r.spent_on, createdAt: r.created_at }),
+    balance: r => ({ id: r.id, amount: Number(r.amount), createdAt: r.created_at }),
+    account: r => ({
+      id: r.id, name: r.name, kind: r.kind || 'saver', standingAmount: num(r.standing_amount),
+      standingStart: r.standing_start || null, monthlyLimit: num(r.monthly_limit), maturesOn: r.matures_on || null,
+      flexible: !!r.flexible, sortOrder: r.sort_order == null ? 0 : Number(r.sort_order), archived: !!r.archived,
+      createdAt: r.created_at
+    }),
+    accountEntry: r => ({ id: r.id, accountId: r.account_id, amount: Number(r.amount), createdAt: r.created_at }),
+    transfer: r => ({
+      id: r.id, accountId: r.account_id, amount: Number(r.amount), movedOn: r.moved_on, note: r.note || '',
+      depositId: r.deposit_id || null, dueDate: r.due_date || null, createdAt: r.created_at
+    })
+  };
+
+  // ---------- The whole ledger ----------
+  // Rules that need several tables at once, shared by the app and the widget. `data` holds mapped rows (see
+  // fromRow): goals, deposits, bills, payments, budgets, spends (this pay period's), balances, accounts,
+  // accountEntries, transfers. Its properties may be getters, so the app can hand over arrays it later replaces.
+  // Call reindex() after payments change.
+  const PAY_TAG = 'pay'; // each month's pay is a one-off income row dated on payday, in this category
+
+  function isPay(b) {
+    return b.kind === 'income' && b.category === PAY_TAG;
+  }
+
+  function ledger(data) {
+    let paidIndex = new Map();
+    const L = {};
+
+    L.reindex = () => { paidIndex = new Map(data.payments.map(p => [p.billId + '|' + p.dueDate, p])); };
+    L.paymentFor = (bill, d) => paidIndex.get(bill.id + '|' + toISODate(d));
+    // The occurrence to pay next: the earliest unpaid one (possibly overdue), or null when everything is paid.
+    L.firstUnpaid = bill => {
+      for (const d of occurrencesFrom(bill, trackFrom(bill))) if (!L.paymentFor(bill, d)) return d;
+      return null;
+    };
+    L.unpaidBetween = (bill, from, to) => occurrencesBetween(bill, from, to).filter(d => !L.paymentFor(bill, d));
+    L.payOn = iso => data.bills.find(b => isPay(b) && b.startDate === iso) || null;
+
+    L.liveGoals = () => data.goals.filter(g => !g.archived);
+    L.liveBudgets = () => data.budgets.filter(b => !b.archived);
+    L.liveAccounts = () => data.accounts.filter(a => !a.archived);
+
+    L.goalPlan = goal => goalPlan(goal, data.deposits);
+
+    // What a budget has used this pay period. `committed` is what the Overview sets aside: the allowance, or more if overspent.
+    L.budgetUse = budget => {
+      const spent = data.spends.filter(s => s.budgetId === budget.id).reduce((t, s) => t + s.amount, 0);
+      return { spent, left: budget.amount - spent, over: spent > budget.amount, committed: Math.max(budget.amount, spent) };
+    };
+
+    // The live account a goal's money is kept in, or null (goals with none work as they did before accounts).
+    L.accountOf = goal => goal && goal.accountId ? L.liveAccounts().find(a => a.id === goal.accountId) || null : null;
+
+    // An account's balance, interest and allowances (see accountState), plus the goals kept in it and what's in
+    // it that no goal has claimed.
+    L.accountInfo = account => {
+      const state = accountState(account, data.accountEntries, data.transfers, startOfToday());
+      const goalsIn = L.liveGoals().filter(g => g.accountId === account.id);
+      const inGoals = goalsIn.reduce((s, g) => s + g.saved, 0);
+      return { ...state, goalsIn, inGoals, unassigned: state.balance - inGoals };
+    };
+
+    // Standing order dates in [from, to], from the day the account was added.
+    L.standingBetween = (account, from, to) => {
+      const so = standingOrder(account);
+      if (!so) return [];
+      const since = trackFrom(so);
+      return occurrencesBetween(so, from, to).filter(d => d >= since);
+    };
+    L.standingDone = (account, d) => {
+      const iso = toISODate(d);
+      return data.transfers.find(t => t.accountId === account.id && t.dueDate === iso) || null;
+    };
+
+    // What an account takes out of the current account this pay period:
+    //   moved          — transfers (net) dated in the period
+    //   unpaidStanding — standing order dates in the period not yet marked done
+    //   goalsLeft      — what its goals still want this period (plans not met yet; skipped goals want nothing)
+    //   extra          — the part of goalsLeft that this period's money in (moved so far, plus the standing order
+    //                    still to go) doesn't cover. Money that was already in the account doesn't count until
+    //                    it's assigned to a goal, which lowers goalsLeft instead.
+    //   committed      — moved + standing order still to go + extra
+    L.accountSaving = (account, period, info) => {
+      info = info || L.accountInfo(account);
+      const from = toISODate(period.start), to = toISODate(period.end);
+      const moved = data.transfers.filter(t => t.accountId === account.id && t.movedOn >= from && t.movedOn <= to)
+        .reduce((s, t) => s + t.amount, 0);
+      const unpaidStanding = L.standingBetween(account, period.start, period.end).filter(d => !L.standingDone(account, d));
+      const standingLeft = unpaidStanding.length * (account.standingAmount || 0);
+      const goalsLeft = info.goalsIn.reduce((s, g) => {
+        const p = L.goalPlan(g);
+        return s + (p.skip ? 0 : Math.max(0, p.planned - Math.max(0, p.savedThisPeriod)));
+      }, 0);
+      const extra = Math.max(0, goalsLeft - Math.max(0, moved) - standingLeft);
+      return { moved, unpaidStanding, standingLeft, goalsLeft, extra, committed: Math.max(0, moved + standingLeft + extra) };
+    };
+
+    // Carries a balance entered this pay period forward to the day before payday. What counts as already in it:
+    //   bills     — due before the day it was entered and marked paid, or marked paid before it was entered;
+    //               unpaid overdue ones come out today
+    //   income    — dated on or before the day it was entered
+    //   transfers — to or from savings accounts, made before it was entered
+    //   deposits  — for goals without a savings account (their money is assumed to leave the current account),
+    //               made before it was entered
+    //   spends    — logged before it was entered, or dated before that day
+    // Standing orders still to go come out on their dates; what goals still need comes out today; what's left in
+    // budgets is spread evenly to payday.
+    L.balanceOutlook = (entry, period) => {
+      const at = new Date(entry.createdAt);
+      const atDay = new Date(at.getFullYear(), at.getMonth(), at.getDate());
+      const today = startOfToday();
+      const dayOf = iso => { const d = new Date(iso); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+      const events = [];
+      const add = (kind, date, amount) => events.push({ kind, date, amount });
+
+      data.bills.filter(b => !b.archived).forEach(b => {
+        occurrencesBetween(b, period.start, period.end).forEach(d => {
+          if (b.kind === 'income') {
+            if (d > atDay) add('income', d, b.amount);
+            return;
+          }
+          const p = L.paymentFor(b, d);
+          if (p && new Date(p.paidAt) > at && d >= atDay) add('bills', dayOf(p.paidAt), -p.amount);
+          else if (!p && d >= trackFrom(b)) add('bills', d < today ? today : d, -b.amount);
+        });
+      });
+      const paired = new Set(data.transfers.map(t => t.depositId).filter(Boolean));
+      const goalById = new Map(data.goals.map(g => [g.id, g]));
+      data.deposits.filter(d => new Date(d.createdAt) > at && !paired.has(d.id) && !L.accountOf(goalById.get(d.goalId)))
+        .forEach(d => add('goals', dayOf(d.createdAt), -d.amount));
+      data.transfers.filter(t => transferTime(t) > at).forEach(t => add('goals', parseLocalDate(t.movedOn), -t.amount));
+      L.liveGoals().filter(g => !L.accountOf(g)).forEach(g => {
+        const plan = L.goalPlan(g);
+        const toSave = plan.skip ? 0 : Math.max(0, plan.planned - Math.max(0, plan.savedThisPeriod));
+        if (toSave > 0) add('goals', today, -toSave);
+      });
+      L.liveAccounts().forEach(a => {
+        const s = L.accountSaving(a, period);
+        s.unpaidStanding.forEach(d => add('goals', d < today ? today : d, -a.standingAmount));
+        if (s.extra > 0) add('goals', today, -s.extra);
+      });
+      data.spends.filter(s => new Date(s.createdAt) > at && parseLocalDate(s.spentOn) >= atDay)
+        .forEach(s => add('budgets', parseLocalDate(s.spentOn), -s.amount));
+      const budgetLeft = L.liveBudgets().reduce((s, b) => s + Math.max(0, L.budgetUse(b).left), 0);
+
+      const total = (kind, ahead) => events
+        .filter(e => (!kind || e.kind === kind) && (e.date >= today) === ahead)
+        .reduce((s, e) => s + e.amount, 0);
+      return {
+        forecast: balanceForecast(entry.amount, events, -budgetLeft, period.end),
+        since: total(null, false),
+        bills: total('bills', true),
+        income: total('income', true),
+        goals: total('goals', true),
+        budgets: total('budgets', true) - budgetLeft
+      };
+    };
+
+    // The Overview's pay period sums:
+    //   leftOver = pay + other income due this period − bills (yearly/quarterly ones left out) − the pot's monthly share
+    //   free     = leftOver − savings (each account's committed, plus goals with no account) − budgets
+    // Also the latest bank balance and its outlook, if it was entered this pay period.
+    L.periodSummary = () => {
+      const today = startOfToday();
+      const period = currentPayPeriod();
+      const billsOnly = data.bills.filter(b => b.kind === 'bill' && !b.archived);
+      const otherIncome = data.bills.filter(b => b.kind === 'income' && !isPay(b) && !b.archived);
+      const pay = L.payOn(toISODate(period.start));
+
+      const otherItems = [];
+      otherIncome.forEach(b => occurrencesBetween(b, period.start, period.end).forEach(d => otherItems.push({ b, d })));
+      const otherTotal = otherItems.reduce((s, i) => s + i.b.amount, 0);
+
+      let billsTotal = 0, potLumpTotal = 0, potLumpCount = 0;
+      billsOnly.forEach(b => {
+        occurrencesBetween(b, period.start, period.end).forEach(d => {
+          const p = L.paymentFor(b, d);
+          const amt = p ? p.amount : b.amount;
+          if (isPotBill(b)) { potLumpTotal += amt; potLumpCount++; }
+          else billsTotal += amt;
+        });
+      });
+      const potMonthly = yearlyBillsPot(billsOnly, today).monthly;
+      const income = (pay ? pay.amount : 0) + otherTotal;
+      const leftOver = income - billsTotal - potMonthly;
+
+      const looseGoals = { committed: 0, saved: 0, skipped: 0 };
+      L.liveGoals().filter(g => !L.accountOf(g)).forEach(g => {
+        const plan = L.goalPlan(g);
+        looseGoals.committed += plan.committed;
+        looseGoals.saved += Math.max(0, plan.savedThisPeriod);
+        if (plan.skip) looseGoals.skipped++;
+      });
+      const accounts = L.liveAccounts().map(a => {
+        const info = L.accountInfo(a);
+        return { account: a, info, saving: L.accountSaving(a, period, info) };
+      });
+      const savings = looseGoals.committed + accounts.reduce((t, x) => t + x.saving.committed, 0);
+
+      let budgetsCommitted = 0, budgetsSpent = 0;
+      L.liveBudgets().forEach(b => {
+        const use = L.budgetUse(b);
+        budgetsCommitted += use.committed;
+        budgetsSpent += use.spent;
+      });
+      const free = leftOver - savings - budgetsCommitted;
+      const daysLeft = Math.max(1, Math.round((period.nextPayday - today) / 86400000));
+
+      const latestBalance = data.balances[data.balances.length - 1] || null;
+      const outlook = latestBalance && new Date(latestBalance.createdAt) >= period.start
+        ? L.balanceOutlook(latestBalance, period) : null;
+
+      return {
+        today, period, billsOnly, otherIncome, pay, otherItems, otherTotal, billsTotal, potLumpTotal, potLumpCount,
+        potMonthly, income, leftOver, looseGoals, accounts, savings, budgetsCommitted, budgetsSpent, free, daysLeft,
+        freePerDay: free / daysLeft, latestBalance, outlook
+      };
+    };
+
+    // What's still to go out this pay period, soonest first: unpaid bills (overdue ones included) and standing
+    // orders not marked done. Income still to come in is included with `income: true`.
+    L.comingUp = () => {
+      const today = startOfToday();
+      const period = currentPayPeriod();
+      const items = [];
+      data.bills.filter(b => !b.archived).forEach(b => {
+        if (b.kind === 'bill') {
+          L.unpaidBetween(b, period.start, period.end).filter(d => d >= trackFrom(b))
+            .forEach(d => items.push({ kind: 'bill', id: b.id, name: b.name, amount: b.amount, date: d }));
+        } else if (!isPay(b)) {
+          occurrencesBetween(b, today, period.end)
+            .forEach(d => items.push({ kind: 'income', id: b.id, name: b.name, amount: b.amount, date: d }));
+        }
+      });
+      L.liveAccounts().forEach(a => L.standingBetween(a, period.start, period.end).filter(d => !L.standingDone(a, d))
+        .forEach(d => items.push({ kind: 'standing', id: a.id, name: `${a.name} standing order`, amount: a.standingAmount, date: d })));
+      return items.sort((x, y) => x.date - y.date);
+    };
+
+    L.reindex();
+    return L;
+  }
+
   return {
+    fromRow, PAY_TAG, isPay, ledger,
     ISA_ALLOWANCE, PERSONAL_SAVINGS_ALLOWANCE, taxYearStart, standingOrder, transferTime, accountState,
     FREQUENCY_LABELS, PER_MONTH, AVG_MONTH_MS,
     parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth, monthShort,

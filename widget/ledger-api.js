@@ -1,0 +1,190 @@
+// Ledger for Scriptable: sign-in and loading data from Supabase, shared by "Ledger Widget" and "Ledger Spend".
+// Save this in Scriptable as "ledger-api", next to "ledger-core" (copied from the root of the repo).
+// Only the Supabase session (never the password) is kept, in the iOS keychain.
+
+const core = importModule('ledger-core');
+
+const SUPABASE_URL = 'https://vpbrurxowgneplxpwkkv.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwYnJ1cnhvd2duZXBseHB3a2t2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1MzAwNzcsImV4cCI6MjEwNjEwNjA3N30.3yq74-z1tkQDNA8BB6JFG3_yFwLN-yjHz_7WJyrAqDs';
+const APP_URL = 'https://deltabellwebapps.github.io/savings-tracker/';
+const SESSION_KEY = 'ledger.session';
+
+const fm = FileManager.local();
+const cachePath = fm.joinPath(fm.documentsDirectory(), 'ledger-cache.json');
+
+class AuthError extends Error {}
+
+// ---------- Auth ----------
+async function authRequest(grant, body) {
+  const req = new Request(`${SUPABASE_URL}/auth/v1/token?grant_type=${grant}`);
+  req.method = 'POST';
+  req.headers = { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' };
+  req.body = JSON.stringify(body);
+  const res = await req.loadJSON();
+  if (req.response.statusCode !== 200) {
+    throw new AuthError(res.error_description || res.msg || 'Sign-in failed');
+  }
+  const session = {
+    access: res.access_token,
+    refresh: res.refresh_token,
+    expiresAt: Date.now() + (res.expires_in - 60) * 1000,
+  };
+  Keychain.set(SESSION_KEY, JSON.stringify(session));
+  return session;
+}
+
+function isSignedIn() {
+  return Keychain.contains(SESSION_KEY);
+}
+
+async function getAccessToken(forceRefresh) {
+  if (!isSignedIn()) return null;
+  const session = JSON.parse(Keychain.get(SESSION_KEY));
+  if (!forceRefresh && Date.now() < session.expiresAt) return session.access;
+  try {
+    return (await authRequest('refresh_token', { refresh_token: session.refresh })).access;
+  } catch (e) {
+    if (e instanceof AuthError) Keychain.remove(SESSION_KEY);
+    throw e;
+  }
+}
+
+// Asks for email and password in an alert. Returns true once signed in.
+async function signIn() {
+  const a = new Alert();
+  a.title = 'Sign in to Ledger';
+  a.message = 'Use the same email and password as the website.';
+  a.addTextField('Email');
+  a.addSecureTextField('Password');
+  a.addAction('Sign in');
+  a.addCancelAction('Cancel');
+  if (await a.presentAlert() === -1) return false;
+  try {
+    await authRequest('password', { email: a.textFieldValue(0).trim(), password: a.textFieldValue(1) });
+    return true;
+  } catch (e) {
+    const err = new Alert();
+    err.title = "Couldn't sign in";
+    err.message = e.message;
+    err.addAction('OK');
+    await err.presentAlert();
+    return false;
+  }
+}
+
+function signOut() {
+  if (isSignedIn()) Keychain.remove(SESSION_KEY);
+  if (fm.fileExists(cachePath)) fm.remove(cachePath);
+}
+
+// ---------- REST ----------
+// Calls the Supabase REST API, refreshing the session once if the token is turned down.
+async function call(method, path, body) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = await getAccessToken(attempt > 0);
+    if (!token) throw new AuthError('Signed out');
+    const req = new Request(`${SUPABASE_URL}/rest/v1/${path}`);
+    req.method = method;
+    req.headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    if (method !== 'GET') req.headers.Prefer = 'return=representation';
+    if (body) req.body = JSON.stringify(body);
+    const res = await req.loadJSON();
+    const status = req.response.statusCode;
+    if (status === 401 && attempt === 0) continue;
+    if (status === 401) throw new AuthError('Session expired');
+    if (status < 200 || status >= 300) {
+      const err = new Error((res && res.message) || `Supabase returned ${status}`);
+      err.status = status;
+      throw err;
+    }
+    return res;
+  }
+}
+
+// Savings accounts need migration 003; until it's run those tables don't exist, so treat them as empty.
+async function optional(path) {
+  try {
+    return await call('GET', path);
+  } catch (e) {
+    if (e instanceof AuthError) throw e;
+    return [];
+  }
+}
+
+// Everything the widget and the quick spend script need, as raw rows.
+async function fetchRows() {
+  const period = core.currentPayPeriod();
+  const since = encodeURIComponent(period.start.toISOString());
+  const sinceDay = core.toISODate(period.start);
+  const [goals, deposits, bills, payments, budgets, spends, balances, accounts, accountEntries, transfers] = await Promise.all([
+    call('GET', 'goals?select=*&order=sort_order.asc'),
+    call('GET', `deposits?select=*&created_at=gte.${since}`),
+    call('GET', 'bills?select=*'),
+    call('GET', 'bill_payments?select=*'),
+    call('GET', 'budgets?select=*&order=sort_order.asc'),
+    call('GET', `spends?select=*&spent_on=gte.${sinceDay}`),
+    call('GET', 'balances?select=*&order=created_at.asc'),
+    optional('accounts?select=*&order=sort_order.asc'),
+    optional('account_balances?select=*&order=created_at.asc'),
+    optional('transfers?select=*&order=moved_on.asc'),
+  ]);
+  return { goals, deposits, bills, payments, budgets, spends, balances, accounts, accountEntries, transfers };
+}
+
+// Raw rows to the shapes ledger-core works with, plus the ledger itself.
+function build(rows) {
+  const map = (list, fn) => (list || []).map(fn);
+  const r = core.fromRow;
+  const data = {
+    goals: map(rows.goals, r.goal),
+    deposits: map(rows.deposits, r.deposit),
+    bills: map(rows.bills, r.bill),
+    payments: map(rows.payments, r.payment),
+    budgets: map(rows.budgets, r.budget),
+    spends: map(rows.spends, r.spend),
+    balances: map(rows.balances, r.balance),
+    accounts: map(rows.accounts, r.account),
+    accountEntries: map(rows.accountEntries, r.accountEntry),
+    transfers: map(rows.transfers, r.transfer),
+  };
+  return { data, L: core.ledger(data) };
+}
+
+function readCache() {
+  try {
+    return fm.fileExists(cachePath) ? JSON.parse(fm.readString(cachePath)) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Returns { L, data, at, stale } or { signedOut: true } or { error }. Falls back to the last copy when offline.
+// A copy from an earlier pay period is no use, so it's only used if it was fetched since this payday.
+async function loadLedger() {
+  if (!isSignedIn()) return { signedOut: true };
+  try {
+    const rows = await fetchRows();
+    const at = Date.now();
+    fm.writeString(cachePath, JSON.stringify({ rows, at }));
+    return { ...build(rows), at, stale: false };
+  } catch (e) {
+    if (e instanceof AuthError) return { signedOut: true };
+    const cached = readCache();
+    if (cached && cached.at >= core.currentPayPeriod().start.getTime()) {
+      return { ...build(cached.rows), at: cached.at, stale: true };
+    }
+    return { error: "Couldn't connect" };
+  }
+}
+
+// Logs a spend against a budget, dated today. Returns the new row.
+async function addSpend(budgetId, amount, note) {
+  const rows = await call('POST', 'spends', [{
+    budget_id: budgetId, amount, note: note || null, spent_on: core.toISODate(core.startOfToday())
+  }]);
+  return core.fromRow.spend(rows[0]);
+}
+
+module.exports = {
+  APP_URL, AuthError, isSignedIn, signIn, signOut, loadLedger, addSpend,
+};

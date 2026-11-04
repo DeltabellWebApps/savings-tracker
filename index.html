@@ -1126,7 +1126,6 @@
   let bills = [];         // bills and income sources, told apart by .kind
   let payments = [];
   let allDeposits = [];    // every goal's deposits; £0 ones mark a goal as skipped for that period
-  let paidIndex = new Map(); // "billId|YYYY-MM-DD" -> payment
   let editingBillId = null;
   let editingBillKind = 'bill';
   let historyBillId = null;
@@ -1157,61 +1156,24 @@
   } = LedgerCore;
 
   // ---------- Mapping ----------
-  function fromGoalRow(row) {
-    return {
-      id: row.id,
-      name: row.name,
-      target: Number(row.target),
-      saved: Number(row.saved),
-      category: row.category || '',
-      targetDate: row.target_date || null,
-      monthlyAmount: row.monthly_amount == null ? null : Number(row.monthly_amount),
-      sortOrder: row.sort_order == null ? 0 : Number(row.sort_order),
-      archived: !!row.archived,
-      accountId: row.account_id || null,
-      createdAt: row.created_at
-    };
-  }
-  function fromDepositRow(row) {
-    return {
-      id: row.id,
-      goalId: row.goal_id,
-      amount: Number(row.amount),
-      note: row.note || '',
-      createdAt: row.created_at
-    };
-  }
-  function fromAccountRow(row) {
-    const num = v => v == null ? null : Number(v);
-    return {
-      id: row.id,
-      name: row.name,
-      kind: row.kind || 'saver',
-      standingAmount: num(row.standing_amount),
-      standingStart: row.standing_start || null,
-      monthlyLimit: num(row.monthly_limit),
-      maturesOn: row.matures_on || null,
-      flexible: !!row.flexible,
-      sortOrder: row.sort_order == null ? 0 : Number(row.sort_order),
-      archived: !!row.archived,
-      createdAt: row.created_at
-    };
-  }
-  function fromAccountEntryRow(row) {
-    return { id: row.id, accountId: row.account_id, amount: Number(row.amount), createdAt: row.created_at };
-  }
-  function fromTransferRow(row) {
-    return {
-      id: row.id,
-      accountId: row.account_id,
-      amount: Number(row.amount),
-      movedOn: row.moved_on,
-      note: row.note || '',
-      depositId: row.deposit_id || null,
-      dueDate: row.due_date || null,
-      createdAt: row.created_at
-    };
-  }
+  const {
+    goal: fromGoalRow, deposit: fromDepositRow, bill: fromBillRow, payment: fromPaymentRow, budget: fromBudgetRow,
+    spend: fromSpendRow, balance: fromBalanceRow, account: fromAccountRow, accountEntry: fromAccountEntryRow,
+    transfer: fromTransferRow
+  } = LedgerCore.fromRow;
+
+  // Rules that need several tables at once (see LedgerCore.ledger). It reads these arrays as they are at the time.
+  const L = LedgerCore.ledger({
+    get goals() { return goals; }, get deposits() { return allDeposits; }, get bills() { return bills; },
+    get payments() { return payments; }, get budgets() { return budgets; }, get spends() { return periodSpends; },
+    get balances() { return balances; }, get accounts() { return accounts; },
+    get accountEntries() { return accountEntries; }, get transfers() { return transfers; }
+  });
+  const {
+    paymentFor, firstUnpaid, unpaidBetween, payOn, goalPlan, budgetUse, liveGoals, liveBudgets, liveAccounts,
+    accountOf, accountInfo, standingBetween, standingDone, accountSaving, balanceOutlook
+  } = L;
+  const { isPay, PAY_TAG } = LedgerCore;
 
   // ---------- Goals CRUD ----------
   async function loadGoals() {
@@ -1284,31 +1246,6 @@
   }
 
   // ---------- Bills CRUD ----------
-  function fromBillRow(row) {
-    return {
-      id: row.id,
-      name: row.name,
-      amount: Number(row.amount),
-      frequency: row.frequency,
-      startDate: row.start_date,
-      endDate: row.end_date || null,
-      kind: row.kind || 'bill',
-      category: row.category || '',
-      archived: !!row.archived,
-      createdAt: row.created_at
-    };
-  }
-
-  function fromPaymentRow(row) {
-    return {
-      id: row.id,
-      billId: row.bill_id,
-      dueDate: row.due_date,
-      amount: Number(row.amount),
-      paidAt: row.paid_at
-    };
-  }
-
   async function loadBills() {
     try {
       const { data, error } = await sb.from('bills').select('*').order('created_at', { ascending: true });
@@ -1365,28 +1302,6 @@
   }
 
   // ---------- Budgets CRUD ----------
-  function fromBudgetRow(row) {
-    return {
-      id: row.id,
-      name: row.name,
-      amount: Number(row.amount),
-      sortOrder: row.sort_order == null ? 0 : Number(row.sort_order),
-      archived: !!row.archived,
-      createdAt: row.created_at
-    };
-  }
-
-  function fromSpendRow(row) {
-    return {
-      id: row.id,
-      budgetId: row.budget_id,
-      amount: Number(row.amount),
-      note: row.note || '',
-      spentOn: row.spent_on,
-      createdAt: row.created_at
-    };
-  }
-
   async function loadBudgets() {
     try {
       const { data, error } = await sb.from('budgets').select('*')
@@ -1425,10 +1340,6 @@
   }
 
   // ---------- Balances CRUD ----------
-  function fromBalanceRow(row) {
-    return { id: row.id, amount: Number(row.amount), createdAt: row.created_at };
-  }
-
   async function loadBalances() {
     try {
       const { data, error } = await sb.from('balances').select('*').order('created_at', { ascending: true });
@@ -1483,35 +1394,7 @@
 
   // ---------- Bill schedule ----------
   function indexPayments() {
-    paidIndex = new Map(payments.map(p => [p.billId + '|' + p.dueDate, p]));
-  }
-
-  function paymentFor(bill, d) {
-    return paidIndex.get(bill.id + '|' + toISODate(d));
-  }
-
-  // The occurrence to pay next: the earliest unpaid one (possibly overdue), or null when everything is paid.
-  function firstUnpaid(bill) {
-    for (const d of occurrencesFrom(bill, trackFrom(bill))) {
-      if (!paymentFor(bill, d)) return d;
-    }
-    return null;
-  }
-
-  function unpaidBetween(bill, from, to) {
-    return occurrencesBetween(bill, from, to).filter(d => !paymentFor(bill, d));
-  }
-
-  // ---------- Pay ----------
-  // Each month's pay is a one-off income row dated on payday, marked by this category.
-  const PAY_TAG = 'pay';
-
-  function isPay(b) {
-    return b.kind === 'income' && b.category === PAY_TAG;
-  }
-
-  function payOn(dateISO) {
-    return bills.find(b => isPay(b) && b.startDate === dateISO) || null;
+    L.reindex();
   }
 
   function monthLabel(d) {
@@ -1576,131 +1459,8 @@
     return input.validity.badInput;
   }
 
-  // See LedgerCore.goalPlan for what the plan holds.
-  function goalPlan(goal) {
-    return LedgerCore.goalPlan(goal, allDeposits);
-  }
-
-  // What a budget has used this pay period. `committed` is what the Overview sets aside: the allowance, or more if overspent.
-  function budgetUse(budget) {
-    const spent = periodSpends.filter(s => s.budgetId === budget.id).reduce((t, s) => t + s.amount, 0);
-    return { spent, left: budget.amount - spent, over: spent > budget.amount, committed: Math.max(budget.amount, spent) };
-  }
-
   // ---------- Savings accounts ----------
   const ACCOUNT_KINDS = { saver: 'Regular saver', isa: 'Cash ISA', other: 'Savings' };
-  const liveAccounts = () => accounts.filter(a => !a.archived);
-
-  // The live account a goal's money is kept in, or null (goals with none work as they did before accounts).
-  function accountOf(goal) {
-    return goal && goal.accountId ? liveAccounts().find(a => a.id === goal.accountId) || null : null;
-  }
-
-  // An account's balance, interest and allowances (see LedgerCore.accountState), plus the goals kept in it
-  // and what's in it that no goal has claimed.
-  function accountInfo(account) {
-    const state = accountState(account, accountEntries, transfers, startOfToday());
-    const goalsIn = liveGoals().filter(g => g.accountId === account.id);
-    const inGoals = goalsIn.reduce((s, g) => s + g.saved, 0);
-    return { ...state, goalsIn, inGoals, unassigned: state.balance - inGoals };
-  }
-
-  // Standing order dates in [from, to], from the day the account was added.
-  function standingBetween(account, from, to) {
-    const so = standingOrder(account);
-    if (!so) return [];
-    const since = trackFrom(so);
-    return occurrencesBetween(so, from, to).filter(d => d >= since);
-  }
-
-  function standingDone(account, d) {
-    const iso = toISODate(d);
-    return transfers.find(t => t.accountId === account.id && t.dueDate === iso) || null;
-  }
-
-  // What an account takes out of the current account this pay period:
-  //   moved          — transfers (net) dated in the period
-  //   unpaidStanding — standing order dates in the period not yet marked done
-  //   goalsLeft      — what its goals still want this period (plans not met yet; skipped goals want nothing)
-  //   extra          — the part of goalsLeft that this period's money in (moved so far, plus the standing order
-  //                    still to go) doesn't cover. Money that was already in the account doesn't count until
-  //                    it's assigned to a goal, which lowers goalsLeft instead.
-  //   committed      — moved + standing order still to go + extra
-  function accountSaving(account, period, info) {
-    info = info || accountInfo(account);
-    const from = toISODate(period.start), to = toISODate(period.end);
-    const moved = transfers.filter(t => t.accountId === account.id && t.movedOn >= from && t.movedOn <= to)
-      .reduce((s, t) => s + t.amount, 0);
-    const unpaidStanding = standingBetween(account, period.start, period.end).filter(d => !standingDone(account, d));
-    const standingLeft = unpaidStanding.length * (account.standingAmount || 0);
-    const goalsLeft = info.goalsIn.reduce((s, g) => {
-      const p = goalPlan(g);
-      return s + (p.skip ? 0 : Math.max(0, p.planned - Math.max(0, p.savedThisPeriod)));
-    }, 0);
-    const extra = Math.max(0, goalsLeft - Math.max(0, moved) - standingLeft);
-    return { moved, unpaidStanding, standingLeft, goalsLeft, extra, committed: Math.max(0, moved + standingLeft + extra) };
-  }
-
-  // Carries a balance entered this pay period forward to the day before payday. What counts as already in it:
-  //   bills     — due before the day it was entered and marked paid, or marked paid before it was entered;
-  //               unpaid overdue ones come out today
-  //   income    — dated on or before the day it was entered
-  //   transfers — to or from savings accounts, made before it was entered
-  //   deposits  — for goals without a savings account (their money is assumed to leave the current account),
-  //               made before it was entered
-  //   spends    — logged before it was entered, or dated before that day
-  // Standing orders still to go come out on their dates; what goals still need comes out today; what's left in
-  // budgets is spread evenly to payday.
-  function balanceOutlook(entry, period) {
-    const at = new Date(entry.createdAt);
-    const atDay = new Date(at.getFullYear(), at.getMonth(), at.getDate());
-    const today = startOfToday();
-    const dayOf = iso => { const d = new Date(iso); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
-    const events = [];
-    const add = (kind, date, amount) => events.push({ kind, date, amount });
-
-    bills.filter(b => !b.archived).forEach(b => {
-      occurrencesBetween(b, period.start, period.end).forEach(d => {
-        if (b.kind === 'income') {
-          if (d > atDay) add('income', d, b.amount);
-          return;
-        }
-        const p = paymentFor(b, d);
-        if (p && new Date(p.paidAt) > at && d >= atDay) add('bills', dayOf(p.paidAt), -p.amount);
-        else if (!p && d >= trackFrom(b)) add('bills', d < today ? today : d, -b.amount);
-      });
-    });
-    const paired = new Set(transfers.map(t => t.depositId).filter(Boolean));
-    const goalById = new Map(goals.map(g => [g.id, g]));
-    allDeposits.filter(d => new Date(d.createdAt) > at && !paired.has(d.id) && !accountOf(goalById.get(d.goalId)))
-      .forEach(d => add('goals', dayOf(d.createdAt), -d.amount));
-    transfers.filter(t => transferTime(t) > at).forEach(t => add('goals', parseLocalDate(t.movedOn), -t.amount));
-    liveGoals().filter(g => !accountOf(g)).forEach(g => {
-      const plan = goalPlan(g);
-      const toSave = plan.skip ? 0 : Math.max(0, plan.planned - Math.max(0, plan.savedThisPeriod));
-      if (toSave > 0) add('goals', today, -toSave);
-    });
-    liveAccounts().forEach(a => {
-      const s = accountSaving(a, period);
-      s.unpaidStanding.forEach(d => add('goals', d < today ? today : d, -a.standingAmount));
-      if (s.extra > 0) add('goals', today, -s.extra);
-    });
-    periodSpends.filter(s => new Date(s.createdAt) > at && parseLocalDate(s.spentOn) >= atDay)
-      .forEach(s => add('budgets', parseLocalDate(s.spentOn), -s.amount));
-    const budgetLeft = liveBudgets().reduce((s, b) => s + Math.max(0, budgetUse(b).left), 0);
-
-    const total = (kind, ahead) => events
-      .filter(e => (!kind || e.kind === kind) && (e.date >= today) === ahead)
-      .reduce((s, e) => s + e.amount, 0);
-    return {
-      forecast: balanceForecast(entry.amount, events, -budgetLeft, period.end),
-      since: total(null, false),
-      bills: total('bills', true),
-      income: total('income', true),
-      goals: total('goals', true),
-      budgets: total('budgets', true) - budgetLeft
-    };
-  }
 
   // "today", "yesterday", "3 days ago"
   function daysAgo(iso) {
@@ -1708,9 +1468,6 @@
     const days = Math.round((startOfToday() - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
     return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
   }
-
-  const liveGoals = () => goals.filter(g => !g.archived);
-  const liveBudgets = () => budgets.filter(b => !b.archived);
 
   // The "Archived (n)" toggle and its rows, shared by goals, bills and budgets.
   //   rows — [{ id, name, meta, amount }]
@@ -3144,53 +2901,28 @@
   // ---------- Overview render ----------
   function renderOverview() {
     const el = document.getElementById('overviewContent');
-    const today = startOfToday();
-    const billsOnly = bills.filter(b => b.kind === 'bill' && !b.archived);
-    const otherIncome = bills.filter(b => b.kind === 'income' && !isPay(b) && !b.archived);
-
-    const period = currentPayPeriod();
     const neg = n => n < 0 ? 'negative' : '';
     let html = '';
 
     // ---------- Pay period summary ----------
+    // The sums come from LedgerCore (ledger().periodSummary), shared with the widget.
+    const sum = L.periodSummary();
+    const {
+      today, period, billsOnly, otherIncome, pay, otherItems, potLumpTotal, potLumpCount, potMonthly, leftOver,
+      budgetsCommitted, budgetsSpent, income, free
+    } = sum;
+    const periodBillsTotal = sum.billsTotal;
     const periodLabel = `${shortDate(period.start)} → ${shortDate(period.end)}`;
     const paydayISO = toISODate(period.start);
-    const pay = payOn(paydayISO);
 
-    const otherItems = [];
-    otherIncome.forEach(b => occurrencesBetween(b, period.start, period.end).forEach(d => otherItems.push({ b, d })));
-    const otherTotal = otherItems.reduce((s, i) => s + i.b.amount, 0);
-
-    // Yearly and quarterly bills don't count when they land; their monthly share (the pot) counts every period.
-    let periodBillsTotal = 0, potLumpTotal = 0, potLumpCount = 0;
-    billsOnly.forEach(b => {
-      occurrencesBetween(b, period.start, period.end).forEach(d => {
-        const p = paymentFor(b, d);
-        const amt = p ? p.amount : b.amount;
-        if (isPotBill(b)) { potLumpTotal += amt; potLumpCount++; }
-        else periodBillsTotal += amt;
-      });
-    });
-    const potMonthly = yearlyBillsPot(billsOnly, today).monthly;
-
-    const leftOver = (pay ? pay.amount : 0) + otherTotal - periodBillsTotal - potMonthly;
     // Goals without a savings account: this period's plans, plus anything saved beyond them.
-    let goalsMonthly = 0, goalsSaved = 0, skippedCount = 0;
-    liveGoals().filter(g => !accountOf(g)).forEach(g => {
-      const plan = goalPlan(g);
-      goalsMonthly += plan.committed;
-      goalsSaved += Math.max(0, plan.savedThisPeriod);
-      if (plan.skip) skippedCount++;
-    });
     const goalsMeta = [
       'set aside this month',
-      goalsSaved > 0 ? `${formatMoney(goalsSaved)} saved so far` : '',
-      skippedCount ? `${skippedCount} skipped` : ''
+      sum.looseGoals.saved > 0 ? `${formatMoney(sum.looseGoals.saved)} saved so far` : '',
+      sum.looseGoals.skipped ? `${sum.looseGoals.skipped} skipped` : ''
     ].filter(Boolean).join(' · ');
     // Savings accounts: what's been moved in this period, plus the standing order and goal money still to go.
-    const accountRows = liveAccounts().map(a => {
-      const info = accountInfo(a);
-      const s = accountSaving(a, period, info);
+    const accountRows = sum.accounts.map(({ account: a, info, saving: s }) => {
       const goalNames = info.goalsIn.length === 1 ? info.goalsIn[0].name : 'goals';
       const meta = [
         Math.abs(s.moved) >= 0.005 ? `${formatMoney(s.moved)} moved in` : '',
@@ -3200,25 +2932,16 @@
       ].filter(Boolean).join(' · ') || 'nothing planned this month';
       return { a, s, meta };
     }).filter(r => r.s.committed > 0.005);
-    goalsMonthly += accountRows.reduce((t, r) => t + r.s.committed, 0);
-    const goalsOnlyMonthly = goalsMonthly - accountRows.reduce((t, r) => t + r.s.committed, 0);
-    // Budgets: each allowance, or what's been spent if that's more.
-    let budgetsCommitted = 0, budgetsSpent = 0;
-    liveBudgets().forEach(b => {
-      const use = budgetUse(b);
-      budgetsCommitted += use.committed;
-      budgetsSpent += use.spent;
-    });
+    const goalsMonthly = sum.savings;             // all savings: accounts plus goals with no account
+    const goalsOnlyMonthly = sum.looseGoals.committed;
     const setAside = goalsMonthly + budgetsCommitted;
-    const income = (pay ? pay.amount : 0) + otherTotal;
-    const free = leftOver - setAside;
 
     // ---------- Headline stats ----------
-    const daysLeft = Math.max(1, Math.round((period.nextPayday - today) / 86400000));
+    const daysLeft = sum.daysLeft;
     const live = liveGoals();
     const totalSaved = live.reduce((s, g) => s + g.saved, 0);
     const totalTarget = live.reduce((s, g) => s + g.target, 0);
-    const accountInfos = liveAccounts().map(a => ({ a, info: accountInfo(a) }));
+    const accountInfos = sum.accounts.map(x => ({ a: x.account, info: x.info }));
     const savingsTotal = accountInfos.reduce((s, x) => s + x.info.balance, 0);
     const stat = (lbl, num, meta, negative) =>
       `<div class="stat"><div class="lbl">${lbl}</div><div class="num ${negative ? 'negative' : ''}">${num}</div><div class="meta">${meta}</div></div>`;
@@ -3480,12 +3203,10 @@
     }
 
     // ---------- Coming up in this period ----------
-    const items = [];
-    billsOnly.forEach(b => unpaidBetween(b, period.start, period.end).forEach(d => items.push({ b, d, isIncome: false })));
-    otherItems.filter(i => i.d >= today).forEach(i => items.push({ ...i, isIncome: true }));
-    liveAccounts().forEach(a => standingBetween(a, period.start, period.end).filter(d => !standingDone(a, d))
-      .forEach(d => items.push({ b: { id: a.id, name: `${a.name} standing order`, amount: a.standingAmount }, d, isStanding: true })));
-    items.sort((x, y) => x.d - y.d);
+    // Shared with the widget (LedgerCore.ledger().comingUp).
+    const items = L.comingUp().map(i => ({
+      b: { id: i.id, name: i.name, amount: i.amount }, d: i.date, isIncome: i.kind === 'income', isStanding: i.kind === 'standing'
+    }));
 
     html += `<h3 class="section-title">Coming up <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">next payday ${shortDate(period.nextPayday)}</span></h3><div class="statement">`;
     html += items.length === 0

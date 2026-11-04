@@ -12,6 +12,7 @@ Live at <https://deltabellwebapps.github.io/savings-tracker/>.
 | `index.html` | The whole web app: markup, styles and script. Four tabs: Overview, Goals, Bills, Budgets. |
 | `ledger-core.js` | The app's core rules: dates, bill schedules, pay periods, the yearly bills pot, money formatting, goal plans and projections, savings account balances, interest and allowances. The app needs it to load. |
 | `supabase/` | SQL migrations, run by hand in the Supabase SQL editor. |
+| `widget/` | iPhone widgets and a quick spend script for [Scriptable](https://scriptable.app). See "Phone widgets" below. |
 
 There's no build step. GitHub Pages serves the files as they are.
 
@@ -130,6 +131,34 @@ The app is mostly used in Safari on an iPhone. Two things to keep when editing t
   is focused and the zoom sticks, pushing the fixed tab bar off screen.
 - Date inputs drop the native look (`appearance: none`, `min-width: 0`). Otherwise iOS gives them a minimum
   width that runs off the edge of the form.
+
+## Phone widgets
+
+Four files go into Scriptable, each saved under the name shown (in Scriptable: **+**, paste, then rename at the top):
+
+| Scriptable name | File | What it is |
+|---|---|---|
+| `ledger-core` | `ledger-core.js` | The shared rules, the same file the website uses. Copy it again whenever it changes. |
+| `ledger-api` | `widget/ledger-api.js` | Sign-in and loading data. The session is kept in the iOS keychain, never the password. |
+| `Ledger Widget` | `widget/ledger-widget.js` | The widget. |
+| `Ledger Spend` | `widget/ledger-spend.js` | Logs a spend against a budget. |
+
+Run **Ledger Widget** once in Scriptable to sign in with the website's email and password. Then add a Scriptable
+widget to the Home Screen or Lock Screen, choose **Ledger Widget**, and set its **Parameter**:
+
+- `free`: free to spend per day, days to payday, and where the bank balance will be before payday. Medium adds the
+  pay period sums; large adds what's coming up.
+- `coming`: bills and standing orders still to go out this pay period, with overdue ones in red.
+- `savings`: total savings, each account's balance with its unassigned money or maturity warning, and goal progress.
+- `budgets`: money left in each budget, against an even pace. Tapping it opens **Ledger Spend**.
+
+Every mode works in the small, medium and large sizes and the three Lock Screen sizes. Widgets refresh when iOS
+allows, roughly every 15–30 minutes, and show the last copy (marked "Offline") when there's no signal.
+
+**Ledger Spend** asks which budget and how much, then logs it dated today. Run it from the budgets widget, from Siri
+("Ledger Spend"), from a Home Screen icon (the script's ⓘ → Add to Home Screen), or from a Shortcut on the Action Button.
+
+The widget's sums come from `ledger()` in `ledger-core.js`, which the Overview uses too, so the two always agree.
 
 ## Running locally
 
