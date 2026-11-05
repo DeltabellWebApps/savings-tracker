@@ -85,7 +85,7 @@ Row-level security limits each user to their own rows.
 | `budgets` | `name`, `amount`, `sort_order`, `archived` | Added in migration 001. |
 | `spends` | `budget_id`, `amount`, `note`, `spent_on` | Added in migration 001. Negative = refund. |
 | `balances` | `amount` | Added in migration 002. One row per balance update; the newest is the current one. Negative = overdrawn. |
-| `accounts` | `name`, `kind` (`saver` / `isa` / `other`), `standing_amount`, `standing_start`, `monthly_limit`, `matures_on`, `flexible`, `sort_order`, `archived` | Added in migration 003. Savings accounts; the current account isn't one. |
+| `accounts` | `name`, `kind` (`saver` / `isa` / `other`), `standing_amount`, `standing_start`, `monthly_limit`, `matures_on`, `flexible`, `isa_paid_before`, `isa_paid_before_year`, `sort_order`, `archived` | Added in migration 003 (`isa_paid_*` in 004). Savings accounts; the current account isn't one. `isa_paid_before` is ISA money paid in before the account was added, counted only in the tax year `isa_paid_before_year` starts. |
 | `account_balances` | `account_id`, `amount` | Added in migration 003. Savings account balances as entered. |
 | `transfers` | `account_id`, `amount`, `moved_on`, `note`, `deposit_id`, `due_date` | Added in migration 003. Positive = into savings. `deposit_id` links one made by saving to a goal; `due_date` marks a standing order occurrence. |
 

@@ -297,7 +297,8 @@
   //   balance    — the latest entry plus transfers since; just the transfers if there's no entry
   //   interest   — [{ date, amount }] per entry after the first
   //   interestThisYear, paidInThisYear, takenOutThisYear — this tax year
-  //   isaUsed    — ISA allowance used this tax year (a flexible ISA gets withdrawals back)
+  //   isaUsed    — ISA allowance used this tax year, including any paid in before the account was added here
+  //                (a flexible ISA gets withdrawals back); isaResetsOn — the next 6 April
   //   paidInThisMonth — this calendar month, for a regular saver's monthly limit
   //   balanceAt(date) — the balance at any time, worked back from the first entry before it
   function accountState(account, entries, transfers, today) {
@@ -327,6 +328,10 @@
     const paidInThisYear = thisYear.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
     const takenOutThisYear = -thisYear.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0);
     const latest = mine[mine.length - 1] || null;
+    // What was paid into an ISA this tax year before it was added here, as entered on the account. It only
+    // counts in the tax year it was entered for, so it drops off on 6 April like everything else.
+    const paidBefore = account.isaPaidBefore && account.isaPaidBeforeYear === toISODate(yearStart) ? account.isaPaidBefore : 0;
+    const isaPaidIn = paidInThisYear + paidBefore;
 
     return {
       balance: latest ? latest.amount + movedBetween(latest.time, null) : movedBetween(null, null),
@@ -335,7 +340,8 @@
       interestThisYear: interest.filter(i => i.date >= yearStart).reduce((s, i) => s + i.amount, 0),
       paidInThisYear,
       takenOutThisYear,
-      isaUsed: account.flexible ? Math.max(0, paidInThisYear - takenOutThisYear) : paidInThisYear,
+      isaUsed: account.flexible ? Math.max(0, isaPaidIn - takenOutThisYear) : isaPaidIn,
+      isaResetsOn: new Date(yearStart.getFullYear() + 1, 3, 6),
       paidInThisMonth: moves.filter(t => t.amount > 0 && parseLocalDate(t.movedOn) >= monthStart)
         .reduce((s, t) => s + t.amount, 0),
       balanceAt
@@ -368,7 +374,8 @@
     account: r => ({
       id: r.id, name: r.name, kind: r.kind || 'saver', standingAmount: num(r.standing_amount),
       standingStart: r.standing_start || null, monthlyLimit: num(r.monthly_limit), maturesOn: r.matures_on || null,
-      flexible: !!r.flexible, sortOrder: r.sort_order == null ? 0 : Number(r.sort_order), archived: !!r.archived,
+      flexible: !!r.flexible, isaPaidBefore: num(r.isa_paid_before), isaPaidBeforeYear: r.isa_paid_before_year || null,
+      sortOrder: r.sort_order == null ? 0 : Number(r.sort_order), archived: !!r.archived,
       createdAt: r.created_at
     }),
     accountEntry: r => ({ id: r.id, accountId: r.account_id, amount: Number(r.amount), createdAt: r.created_at }),

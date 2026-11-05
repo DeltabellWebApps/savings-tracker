@@ -1007,6 +1007,11 @@
       <label class="field-check"><input id="accountFlexibleInput" type="checkbox"> Flexible ISA</label>
       <div class="field-hint">Money you take out can be put back in the same tax year without using more allowance.</div>
     </div>
+    <div class="field" id="accountIsaPaidField">
+      <label for="accountIsaPaidInput">Already paid in this tax year (optional)</label>
+      <input id="accountIsaPaidInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
+      <div class="field-hint">Money you put in since 6 April, before you added the account here. Don't count interest or earlier years. Transfers you log here are added on top.</div>
+    </div>
     <div class="sheet-actions">
       <button class="btn-cancel" id="cancelAccount">Cancel</button>
       <button class="btn-primary" id="saveAccount">Save account</button>
@@ -1724,7 +1729,7 @@
       }
       if (a.kind === 'isa') {
         const pct = Math.min(100, (info.isaUsed / ISA_ALLOWANCE) * 100);
-        notes.push(`<div class="account-note ${info.isaUsed > ISA_ALLOWANCE ? 'warn' : ''}">ISA allowance: ${formatMoney(info.isaUsed)} of ${formatMoney(ISA_ALLOWANCE)} used this tax year${a.flexible && info.takenOutThisYear > 0 ? ` (flexible: ${formatMoney(info.takenOutThisYear)} taken out can go back in)` : ''}
+        notes.push(`<div class="account-note ${info.isaUsed > ISA_ALLOWANCE ? 'warn' : ''}">ISA allowance: ${formatMoney(info.isaUsed)} of ${formatMoney(ISA_ALLOWANCE)} used this tax year${a.flexible && info.takenOutThisYear > 0 ? ` (flexible: ${formatMoney(info.takenOutThisYear)} taken out can go back in)` : ''} · resets ${shortDate(info.isaResetsOn)}
           <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div>`);
       }
       if (a.monthlyLimit) {
@@ -1822,6 +1827,7 @@
   const accountLimitInput = document.getElementById('accountLimitInput');
   const accountMaturesInput = document.getElementById('accountMaturesInput');
   const accountFlexibleInput = document.getElementById('accountFlexibleInput');
+  const accountIsaPaidInput = document.getElementById('accountIsaPaidInput');
   let editingAccountId = null;
 
   // A regular saver has a monthly limit and a maturity date; an ISA can be flexible.
@@ -1830,6 +1836,7 @@
     document.getElementById('accountLimitField').style.display = kind === 'saver' ? 'block' : 'none';
     document.getElementById('accountMaturesField').style.display = kind === 'saver' ? 'block' : 'none';
     document.getElementById('accountFlexibleField').style.display = kind === 'isa' ? 'block' : 'none';
+    document.getElementById('accountIsaPaidField').style.display = kind === 'isa' ? 'block' : 'none';
     document.getElementById('accountStandingDateField').style.display = accountStandingInput.value ? 'block' : 'none';
     accountNameInput.placeholder = `e.g. ${ACCOUNT_KINDS[kind] === 'Savings' ? 'Easy access saver' : ACCOUNT_KINDS[kind]}`;
   }
@@ -1849,6 +1856,9 @@
     accountLimitInput.value = a && a.monthlyLimit ? a.monthlyLimit : '';
     accountMaturesInput.value = a && a.maturesOn ? a.maturesOn : '';
     accountFlexibleInput.checked = !!(a && a.flexible);
+    // Only show last tax year's figure if it's for this tax year; an old one no longer counts.
+    accountIsaPaidInput.value = a && a.isaPaidBefore && a.isaPaidBeforeYear === toISODate(LedgerCore.taxYearStart(startOfToday()))
+      ? a.isaPaidBefore : '';
     document.getElementById('deleteAccountRow').style.display = a ? 'flex' : 'none';
     syncAccountFields();
     accountOverlay.classList.add('open');
@@ -1876,6 +1886,9 @@
     const openingRaw = accountOpeningInput.value.trim();
     const opening = openingRaw ? parseFloat(openingRaw) : null;
     if (!editingAccountId && opening !== null && !Number.isFinite(opening)) { showToast('Enter the balance'); return; }
+    const isaPaidRaw = accountIsaPaidInput.value.trim();
+    const isaPaid = kind === 'isa' && isaPaidRaw ? parseFloat(isaPaidRaw) : null;
+    if (isaPaid !== null && !(isaPaid >= 0)) { showToast('Enter what you paid in this tax year, or leave it blank'); return; }
 
     const fields = {
       name, kind,
@@ -1883,7 +1896,9 @@
       standing_start: standing ? accountStandingDateInput.value : null,
       monthly_limit: limit,
       matures_on: kind === 'saver' && accountMaturesInput.value ? accountMaturesInput.value : null,
-      flexible: kind === 'isa' && accountFlexibleInput.checked
+      flexible: kind === 'isa' && accountFlexibleInput.checked,
+      isa_paid_before: isaPaid || null,
+      isa_paid_before_year: isaPaid ? toISODate(LedgerCore.taxYearStart(startOfToday())) : null
     };
     const saveBtn = document.getElementById('saveAccount');
     saveBtn.disabled = true;
