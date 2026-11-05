@@ -911,7 +911,7 @@
     <div class="field" id="depositSourceField" style="display:none;">
       <label for="depositSourceInput">Where's the money from?</label>
       <select id="depositSourceInput"></select>
-      <div class="field-hint">For a negative amount, "moved" means it went back to your current account.</div>
+      <div class="field-hint" id="depositSourceHint"></div>
     </div>
     <div class="field">
       <label for="depositNoteInput">Note (optional)</label>
@@ -1234,8 +1234,10 @@
     }
   }
 
-  async function createDepositRemote(goalId, amount, note) {
-    const { data, error } = await sb.from('deposits').insert([{ goal_id: goalId, amount, note: note || null }]).select();
+  async function createDepositRemote(goalId, amount, note, external) {
+    const row = { goal_id: goalId, amount, note: note || null };
+    if (external) row.external = true; // only sent when set, so ordinary deposits work before migration 005
+    const { data, error } = await sb.from('deposits').insert([row]).select();
     if (error) throw error;
     return fromDepositRow(data[0]);
   }
@@ -1620,6 +1622,9 @@
       else if (plan.planned > 0 && plan.savedThisPeriod >= plan.planned) suggestion = `✓ ${formatMoney(plan.savedThisPeriod)} saved this month${plan.dueLabel ? ` · on track for ${plan.dueLabel}` : ''}`;
       else if (plan.savedThisPeriod > 0 && plan.planned > 0) suggestion = `${formatMoney(plan.savedThisPeriod)} of ${formatMoney(plan.planned)} saved this month${by}`;
       else if (plan.planned > 0) suggestion = `Save ${formatMoney(plan.planned)}/mo${by}`;
+      if (Math.abs(plan.fromOutside) >= 0.005 && !plan.overdue) {
+        suggestion += `${suggestion ? ' · ' : ''}${plan.fromOutside > 0 ? '+' : '−'}${formatMoney(Math.abs(plan.fromOutside))} from outside this month`;
+      }
       const suggestionHtml = suggestion ? `<div class="suggestion-line ${plan.overdue ? 'overdue' : ''}">${suggestion}</div>` : '';
       const projectionHtml = plan.projection
         ? `<div class="projection-line ${plan.projection.tone === 'behind' ? 'behind' : ''}">${plan.projection.text}</div>` : '';
@@ -2119,7 +2124,7 @@
     accountHistoryList.innerHTML = rows.length === 0 ? '<div class="history-empty">Nothing yet.</div>' : rows.map(r => {
       if (r.t) {
         const goal = r.t.depositId && depositGoal.get(r.t.depositId);
-        const what = goal ? `for ${escapeHtml(goal.name)}` : r.t.dueDate ? 'standing order' : r.t.amount > 0 ? 'from current account' : 'back to current account';
+        const what = goal ? `for ${escapeHtml(goal.name)}${r.t.external ? ', from outside your income' : ''}` : r.t.dueDate ? 'standing order' : r.t.amount > 0 ? 'from current account' : 'back to current account';
         return `
           <div class="history-item">
             <div class="history-main">
@@ -2419,17 +2424,40 @@
   let editingDepositOriginalAmount = 0;
   let depositAssignOnly = false; // opened from an account's "Assign": no transfer, goal picked in the sheet
 
-  // For a goal kept in a savings account: did the money move from the current account (recorded as a
-  // transfer too), or is it already in the account and only being assigned to the goal?
+  // Where the money came from:
+  //   move     — the current account (for a goal in a savings account, recorded as a transfer too)
+  //   assign   — already in the goal's savings account; only assigned to the goal
+  //   external — from outside your income (e.g. a cashback app). Marked `external`, so it adds to the goal
+  //              without coming off the current account or counting towards this month's plan. For a goal in
+  //              a savings account it's also recorded as an `external` transfer, so the balance includes it.
+  const depositSourceHint = document.getElementById('depositSourceHint');
+  function syncDepositSourceHint() {
+    const v = depositSourceInput.value;
+    depositSourceHint.textContent = v === 'external'
+      ? "Adds to the goal without coming off your income or bank balance. This month's plan stays the same."
+      : v === 'move' && depositSourceInput.dataset.account
+        ? 'For a negative amount, this means it went back to your current account.'
+        : '';
+  }
+  depositSourceInput.addEventListener('change', syncDepositSourceHint);
+
   function syncDepositSource(goal) {
     const account = accountOf(goal);
-    depositSourceField.style.display = account && !depositAssignOnly ? 'block' : 'none';
-    if (!account) return;
-    const unassigned = accountInfo(account).unassigned;
-    depositSourceInput.innerHTML = `
-      <option value="move">Moved from current account to ${escapeHtml(account.name)}</option>
-      <option value="assign">Already in ${escapeHtml(account.name)}${unassigned > 0.005 ? ` (${formatMoney(unassigned)} unassigned)` : ''}</option>`;
+    depositSourceField.style.display = depositAssignOnly ? 'none' : 'block';
+    depositSourceInput.dataset.account = account ? '1' : '';
+    if (account) {
+      const unassigned = accountInfo(account).unassigned;
+      depositSourceInput.innerHTML = `
+        <option value="move">Moved from current account to ${escapeHtml(account.name)}</option>
+        <option value="assign">Already in ${escapeHtml(account.name)}${unassigned > 0.005 ? ` (${formatMoney(unassigned)} unassigned)` : ''}</option>
+        <option value="external">Paid into ${escapeHtml(account.name)} from somewhere else</option>`;
+    } else {
+      depositSourceInput.innerHTML = `
+        <option value="move">My income / current account</option>
+        <option value="external">Somewhere else (e.g. cashback app)</option>`;
+    }
     depositSourceInput.value = 'move';
+    syncDepositSourceHint();
   }
 
   function openDepositSheet(goalId) {
@@ -2481,9 +2509,9 @@
     depositAmountInput.value = dep.amount;
     depositNoteInput.value = dep.note || '';
     const linkedAccount = linked && accounts.find(a => a.id === linked.accountId);
-    depositHint.textContent = linked
-      ? `This also changes the ${formatMoney(Math.abs(linked.amount))} transfer ${linked.amount > 0 ? 'to' : 'from'} ${linkedAccount ? linkedAccount.name : 'savings'}.`
-      : DEPOSIT_HINT;
+    depositHint.textContent = (dep.external ? 'From somewhere else, not your income. ' : '') + (linked
+      ? `This also changes the ${formatMoney(Math.abs(linked.amount))} ${dep.external ? 'payment into' : `transfer ${linked.amount > 0 ? 'to' : 'from'}`} ${linkedAccount ? linkedAccount.name : 'savings'}.`
+      : DEPOSIT_HINT);
     depositGoalField.style.display = 'none';
     depositSourceField.style.display = 'none';
     deleteDepositRow.style.display = 'flex';
@@ -2510,7 +2538,8 @@
     saveBtn.disabled = true;
     // The database adjusts the goal's saved total itself whenever a deposit changes; mirror it locally.
     const account = depositAssignOnly ? null : accountOf(g);
-    const move = account && depositSourceInput.value === 'move';
+    const external = !depositAssignOnly && !editingDepositId && depositSourceInput.value === 'external';
+    const move = account && (depositSourceInput.value === 'move' || external);
     try {
       if (editingDepositId) {
         await updateDepositRemote(editingDepositId, { amount, note: note || null });
@@ -2524,13 +2553,14 @@
         }
         showToast('Entry updated');
       } else {
-        const dep = await createDepositRemote(g.id, amount, note);
+        const dep = await createDepositRemote(g.id, amount, note, external);
         allDeposits.push(dep);
         g.saved += amount;
         if (move) {
           try {
             transfers.push(await createTransferRemote({
-              account_id: account.id, amount, moved_on: toISODate(startOfToday()), note: g.name, deposit_id: dep.id
+              account_id: account.id, amount, moved_on: toISODate(startOfToday()), note: g.name, deposit_id: dep.id,
+              ...(external ? { external: true } : {})
             }));
           } catch (e) {
             render();
@@ -2539,7 +2569,7 @@
             return;
           }
         }
-        showToast(`${amount > 0 ? 'Added' : 'Adjusted'} ${formatMoney(amount)} — ${g.name}${move ? ` · moved to ${account.name}` : ''}`);
+        showToast(`${amount > 0 ? 'Added' : 'Adjusted'} ${formatMoney(amount)} — ${g.name}${external ? ' · from outside your income' : move ? ` · moved to ${account.name}` : ''}`);
       }
       render();
       closeDepositSheet();
@@ -2599,6 +2629,7 @@
   function linkedNote(dep) {
     const t = transfers.find(x => x.depositId === dep.id);
     const a = t && accounts.find(x => x.id === t.accountId);
+    if (dep.external) return ` · from outside your income${a ? `, into ${escapeHtml(a.name)}` : ''}`;
     return a ? ` · ${t.amount > 0 ? 'moved to' : 'moved back from'} ${escapeHtml(a.name)}` : '';
   }
 
@@ -3003,7 +3034,11 @@
       } else {
         const out = balanceOutlook(latestBalance, period);
         const fc = out.forecast;
-        currentNow = fc.now;
+        // "Estimated now" only counts what's dated before today, but savings balances already include transfers
+        // made today (or dated later), so take those off here or the total would count them twice.
+        currentNow = fc.now - transfers
+          .filter(t => !t.external && transferTime(t) > enteredAt && parseLocalDate(t.movedOn) >= today)
+          .reduce((s, t) => s + t.amount, 0);
         const row = (name, meta, amount) => Math.abs(amount) < 0.005 ? '' : `
           <div class="statement-row">
             <div>${name}<span class="meta">${meta}</span></div>
@@ -3059,7 +3094,10 @@
       html += '<div class="statement" style="margin-top: 10px;">';
       html += accountInfos.map(({ a, info }) => `
         <div class="statement-row">
-          <div>${escapeHtml(a.name)}<span class="meta">${ACCOUNT_KINDS[a.kind]}${info.latestEntry ? ` · balance entered ${daysAgo(info.latestEntry.createdAt)}` : ''}</span></div>
+          <div>${escapeHtml(a.name)}<span class="meta">${[
+            a.name.toLowerCase() === ACCOUNT_KINDS[a.kind].toLowerCase() ? '' : ACCOUNT_KINDS[a.kind],
+            info.latestEntry ? `balance entered ${daysAgo(info.latestEntry.createdAt)}` : 'no balance entered yet'
+          ].filter(Boolean).join(' · ')}</span></div>
           <div class="amt ${neg(info.balance)}">${formatMoney(info.balance)}</div>
         </div>`).join('');
       html += currentNow === null
@@ -3068,7 +3106,7 @@
             <div class="amt ${neg(savingsTotal)}">${formatMoney(savingsTotal)}</div>
           </div>`
         : `<div class="statement-row total">
-            <div>Total<span class="meta">current account ${currentNow === latestBalance.amount ? '' : 'estimated now '}plus savings</span></div>
+            <div>Total<span class="meta">current account ${Math.abs(currentNow - latestBalance.amount) < 0.005 ? '' : 'estimated now '}plus savings</span></div>
             <div class="amt ${neg(currentNow + savingsTotal)}">${formatMoney(currentNow + savingsTotal)}</div>
           </div>`;
       html += '</div>';

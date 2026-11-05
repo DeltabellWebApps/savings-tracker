@@ -79,7 +79,7 @@ Row-level security limits each user to their own rows.
 | Table | Columns | Notes |
 |---|---|---|
 | `goals` | `name`, `target`, `saved`, `category`, `target_date`, `monthly_amount`, `sort_order`, `archived` | `saved` is kept up to date by a trigger on `deposits`. Never write it directly. |
-| `deposits` | `goal_id`, `amount`, `note` | Negative = withdrawal, 0 = skipped month. |
+| `deposits` | `goal_id`, `amount`, `note`, `external` | Negative = withdrawal, 0 = skipped month. `external` (migration 005) = from outside your income: counts towards the goal but not the current account or this month's plan. |
 | `bills` | `name`, `amount`, `frequency`, `start_date`, `end_date`, `kind` (`bill` / `income`), `category`, `archived` | Also holds income sources and monthly pay. |
 | `bill_payments` | `bill_id`, `due_date`, `amount`, `paid_at` | One row per occurrence marked paid. |
 | `budgets` | `name`, `amount`, `sort_order`, `archived` | Added in migration 001. |
@@ -87,7 +87,7 @@ Row-level security limits each user to their own rows.
 | `balances` | `amount` | Added in migration 002. One row per balance update; the newest is the current one. Negative = overdrawn. |
 | `accounts` | `name`, `kind` (`saver` / `isa` / `other`), `standing_amount`, `standing_start`, `monthly_limit`, `matures_on`, `flexible`, `isa_paid_before`, `isa_paid_before_year`, `sort_order`, `archived` | Added in migration 003 (`isa_paid_*` in 004). Savings accounts; the current account isn't one. `isa_paid_before` is ISA money paid in before the account was added, counted only in the tax year `isa_paid_before_year` starts. |
 | `account_balances` | `account_id`, `amount` | Added in migration 003. Savings account balances as entered. |
-| `transfers` | `account_id`, `amount`, `moved_on`, `note`, `deposit_id`, `due_date` | Added in migration 003. Positive = into savings. `deposit_id` links one made by saving to a goal; `due_date` marks a standing order occurrence. |
+| `transfers` | `account_id`, `amount`, `moved_on`, `note`, `deposit_id`, `due_date`, `external` | Added in migration 003 (`external` in 005). Positive = into savings. `deposit_id` links one made by saving to a goal; `due_date` marks a standing order occurrence; `external` marks money paid in from outside your income, which doesn't come out of the current account. |
 
 Migration 003 also adds `goals.account_id`, the account a goal's money is kept in.
 

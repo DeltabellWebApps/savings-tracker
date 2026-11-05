@@ -186,7 +186,11 @@
   // What a goal asks for this pay period. It's worked out from where the goal stood when the period began,
   // so money added during the period counts towards it rather than shrinking it. `deposits` may hold other
   // goals' and older periods' deposits; only this goal's from this period count. £0 deposits mark a skip.
+  // Deposits marked `external` came from somewhere other than income (e.g. a cashback app). They count towards
+  // the goal's total but not towards this period's plan, so the plan from income stays the same and the extra
+  // just brings the goal closer (next period's plan shrinks to match).
   //   planned   — this period's amount (from the target date, or the goal's monthly amount)
+  //   savedThisPeriod — saved from income this period; fromOutside — added from outside this period
   //   committed — what the Overview sets aside: the plan, or more if more was saved; only what was saved if skipped
   //   afterSkip — the monthly amount needed from next period if this one is skipped
   //   projection — a short forecast line (finish month, or ahead/behind a steady pace), or null;
@@ -194,11 +198,12 @@
   function goalPlan(goal, deposits) {
     const period = currentPayPeriod();
     const mine = (deposits || []).filter(d => d.goalId === goal.id && new Date(d.createdAt) >= period.start);
-    const skip = mine.find(d => d.amount === 0) || null;
-    const savedThisPeriod = mine.reduce((s, d) => s + d.amount, 0);
+    const skip = mine.find(d => d.amount === 0 && !d.external) || null;
+    const savedThisPeriod = mine.filter(d => !d.external).reduce((s, d) => s + d.amount, 0);
+    const fromOutside = mine.filter(d => d.external).reduce((s, d) => s + d.amount, 0);
     const remaining = goal.target - goal.saved;
-    const remainingAtStart = remaining + savedThisPeriod;
-    const plan = { planned: 0, savedThisPeriod, skip, remaining, overdue: false, dueLabel: null, afterSkip: 0 };
+    const remainingAtStart = remaining + savedThisPeriod + fromOutside;
+    const plan = { planned: 0, savedThisPeriod, fromOutside, skip, remaining, overdue: false, dueLabel: null, afterSkip: 0 };
 
     if (goal.targetDate) {
       const due = parseLocalDate(goal.targetDate);
@@ -236,7 +241,7 @@
       const due = parseLocalDate(goal.targetDate);
       if (!created || due <= created) return null;
       const expected = goal.target * Math.min(1, Math.max(0, (period.start - created) / (due - created)));
-      const savedAtStart = goal.saved - plan.savedThisPeriod;
+      const savedAtStart = goal.saved - plan.savedThisPeriod - plan.fromOutside;
       const diff = savedAtStart - expected;
       const monthlyShare = goal.target / Math.max(1, (due - created) / AVG_MONTH_MS);
       if (Math.abs(diff) < Math.max(1, monthlyShare / 2)) return { text: 'On schedule', tone: 'good' };
@@ -358,7 +363,9 @@
       sortOrder: r.sort_order == null ? 0 : Number(r.sort_order), archived: !!r.archived,
       accountId: r.account_id || null, createdAt: r.created_at
     }),
-    deposit: r => ({ id: r.id, goalId: r.goal_id, amount: Number(r.amount), note: r.note || '', createdAt: r.created_at }),
+    deposit: r => ({
+      id: r.id, goalId: r.goal_id, amount: Number(r.amount), note: r.note || '', external: !!r.external, createdAt: r.created_at
+    }),
     bill: r => ({
       id: r.id, name: r.name, amount: Number(r.amount), frequency: r.frequency, startDate: r.start_date,
       endDate: r.end_date || null, kind: r.kind || 'bill', category: r.category || '', archived: !!r.archived,
@@ -381,7 +388,7 @@
     accountEntry: r => ({ id: r.id, accountId: r.account_id, amount: Number(r.amount), createdAt: r.created_at }),
     transfer: r => ({
       id: r.id, accountId: r.account_id, amount: Number(r.amount), movedOn: r.moved_on, note: r.note || '',
-      depositId: r.deposit_id || null, dueDate: r.due_date || null, createdAt: r.created_at
+      depositId: r.deposit_id || null, dueDate: r.due_date || null, external: !!r.external, createdAt: r.created_at
     })
   };
 
@@ -447,7 +454,7 @@
     };
 
     // What an account takes out of the current account this pay period:
-    //   moved          — transfers (net) dated in the period
+    //   moved          — transfers (net) dated in the period, leaving out money paid in from outside (`external`)
     //   unpaidStanding — standing order dates in the period not yet marked done
     //   goalsLeft      — what its goals still want this period (plans not met yet; skipped goals want nothing)
     //   extra          — the part of goalsLeft that this period's money in (moved so far, plus the standing order
@@ -457,7 +464,7 @@
     L.accountSaving = (account, period, info) => {
       info = info || L.accountInfo(account);
       const from = toISODate(period.start), to = toISODate(period.end);
-      const moved = data.transfers.filter(t => t.accountId === account.id && t.movedOn >= from && t.movedOn <= to)
+      const moved = data.transfers.filter(t => t.accountId === account.id && !t.external && t.movedOn >= from && t.movedOn <= to)
         .reduce((s, t) => s + t.amount, 0);
       const unpaidStanding = L.standingBetween(account, period.start, period.end).filter(d => !L.standingDone(account, d));
       const standingLeft = unpaidStanding.length * (account.standingAmount || 0);
@@ -475,7 +482,7 @@
     //   income    — dated on or before the day it was entered
     //   transfers — to or from savings accounts, made before it was entered
     //   deposits  — for goals without a savings account (their money is assumed to leave the current account),
-    //               made before it was entered
+    //               made before it was entered; ones from outside (`external`) never touch the current account
     //   spends    — logged before it was entered, or dated before that day
     // Standing orders still to go come out on their dates; what goals still need comes out today; what's left in
     // budgets is spread evenly to payday.
@@ -500,9 +507,9 @@
       });
       const paired = new Set(data.transfers.map(t => t.depositId).filter(Boolean));
       const goalById = new Map(data.goals.map(g => [g.id, g]));
-      data.deposits.filter(d => new Date(d.createdAt) > at && !paired.has(d.id) && !L.accountOf(goalById.get(d.goalId)))
+      data.deposits.filter(d => new Date(d.createdAt) > at && !d.external && !paired.has(d.id) && !L.accountOf(goalById.get(d.goalId)))
         .forEach(d => add('goals', dayOf(d.createdAt), -d.amount));
-      data.transfers.filter(t => transferTime(t) > at).forEach(t => add('goals', parseLocalDate(t.movedOn), -t.amount));
+      data.transfers.filter(t => transferTime(t) > at && !t.external).forEach(t => add('goals', parseLocalDate(t.movedOn), -t.amount));
       L.liveGoals().filter(g => !L.accountOf(g)).forEach(g => {
         const plan = L.goalPlan(g);
         const toSave = plan.skip ? 0 : Math.max(0, plan.planned - Math.max(0, plan.savedThisPeriod));
