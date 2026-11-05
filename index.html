@@ -2979,7 +2979,9 @@
     // ---------- Bank balance ----------
     const latestBalance = balances[balances.length - 1] || null;
     const paydayShort = period.nextPayday.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-    html += `<h3 class="section-title" style="margin-top: 0;">Bank balance <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">current account</span></h3><div class="statement">`;
+    // The current account as it stands now, for the total with savings below: the estimate when there is one.
+    let currentNow = latestBalance ? latestBalance.amount : null;
+    html += `<h3 class="section-title" style="margin-top: 0;">Bank balance <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${accountInfos.length ? 'current account and savings' : 'current account'}</span></h3><div class="statement">`;
     if (!latestBalance) {
       html += `
         <div class="statement-row">
@@ -3001,6 +3003,7 @@
       } else {
         const out = balanceOutlook(latestBalance, period);
         const fc = out.forecast;
+        currentNow = fc.now;
         const row = (name, meta, amount) => Math.abs(amount) < 0.005 ? '' : `
           <div class="statement-row">
             <div>${name}<span class="meta">${meta}</span></div>
@@ -3050,6 +3053,26 @@
       }
     }
     html += '</div>';
+
+    // Savings accounts and the total across everything, so the whole picture is in one place.
+    if (accountInfos.length) {
+      html += '<div class="statement" style="margin-top: 10px;">';
+      html += accountInfos.map(({ a, info }) => `
+        <div class="statement-row">
+          <div>${escapeHtml(a.name)}<span class="meta">${ACCOUNT_KINDS[a.kind]}${info.latestEntry ? ` · balance entered ${daysAgo(info.latestEntry.createdAt)}` : ''}</span></div>
+          <div class="amt ${neg(info.balance)}">${formatMoney(info.balance)}</div>
+        </div>`).join('');
+      html += currentNow === null
+        ? `<div class="statement-row total">
+            <div>Total in savings<span class="meta">add your current account balance to include it</span></div>
+            <div class="amt ${neg(savingsTotal)}">${formatMoney(savingsTotal)}</div>
+          </div>`
+        : `<div class="statement-row total">
+            <div>Total<span class="meta">current account ${currentNow === latestBalance.amount ? '' : 'estimated now '}plus savings</span></div>
+            <div class="amt ${neg(currentNow + savingsTotal)}">${formatMoney(currentNow + savingsTotal)}</div>
+          </div>`;
+      html += '</div>';
+    }
 
     // Other income sits under pay: one row per source. Sources due this period count towards left over;
     // the rest stay listed (greyed, not counted) so they can still be edited, with the add button last.
