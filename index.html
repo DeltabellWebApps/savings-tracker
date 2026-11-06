@@ -2498,9 +2498,15 @@
     try {
       if (editingGoalId) {
         const g = goals.find(x => x.id === editingGoalId);
+        // Switching an existing goal to straight-out: what it has had so far counts as already paid, from the
+        // account each entry was in. Any of it in a savings account stops being claimed and shows as unassigned.
         if (fields.straight_out && !g.straightOut && heldTotal(g) > 0.005) {
-          showToast(`Pay out the ${formatMoney(heldTotal(g))} it holds first`);
-          return;
+          const inSavings = [...goalHeld(g).entries()].filter(([k]) => k).reduce((s, [, v]) => s + v, 0);
+          const ok = await askConfirm(`Switch ${g.name} to straight out?`,
+            `The ${formatMoney(heldTotal(g))} it has had so far will count as already paid, so it won't show as kept anywhere.` +
+            (inSavings > 0.005 ? ` ${formatMoney(inSavings)} of that is in a savings account, and will show there as unassigned.` : ''),
+            'Switch');
+          if (!ok) return;
         }
         await updateGoalRemote(editingGoalId, fields);
         Object.assign(g, fromGoalRow({ ...fields, id: g.id, saved: g.saved, sort_order: g.sortOrder, archived: g.archived,
