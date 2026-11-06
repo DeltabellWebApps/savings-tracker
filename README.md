@@ -36,15 +36,26 @@ There's no build step. GitHub Pages serves the files as they are.
   balance, and the bank balance forecast still takes each bill out on its due date.
   The rules are in `yearlyBillsPot()` in `ledger-core.js`.
 - **Goals** have either a target date (the app works out the monthly amount) or a fixed monthly amount.
+  The target is optional: a goal without one is open-ended and asks for its monthly amount every month.
   A £0 deposit marks a month as skipped. Each goal shows a projection: ahead of or behind a steady pace for
-  dated goals, or an estimated finish month for the others.
-- **Savings accounts** (regular saver, cash ISA, other) are listed at the top of the Goals tab. Money gets there
-  by a **transfer** from the current account (or back again), and each goal can say which account its money is
-  kept in. Saving to such a goal asks whether the money was moved from the current account (recorded as a
-  transfer too, linked to the goal entry) or was already in the account (only assigned). Anything in an account
-  that no goal claims shows as *unassigned*, with an "Assign" button. Balances are entered by hand now and then;
-  any change beyond the transfers in between counts as interest. Also per account:
-  - a monthly standing order in, which shows in "Coming up" with a "Done" button and stops at maturity
+  dated goals, or an estimated finish month for the others. A monthly amount can have a day of the month, which
+  puts it in "Coming up" with a "Done" button.
+  - Each goal entry records **where its money is kept**: a savings account, or the current account. So one goal's
+    money can sit in several accounts, and each account knows how much of its balance belongs to each goal.
+  - **Pay out** spends a goal's money: it leaves the account for good. It lowers what the goal *holds* but not
+    what it has *saved*, so a goal you've spent on stays complete (and can then be archived).
+  - A goal can be set to **money goes straight out** (e.g. mortgage or loan overpayments). Nothing is kept: each
+    amount comes off the account it was paid from, and cashback counts as "from outside my income".
+- **Moving money.** One "Move money" form does every movement: from the current account, a savings account or
+  outside your income, to a savings account, the current account or paid out, optionally split between goals.
+  Money not given to a goal stays *unassigned*. "+ Add" and "Pay out" on a goal, "Assign" and "Done" on an
+  account all open it filled in. The rules for what it records are in the comment above `openMoveSheet()` in
+  `index.html`.
+- **Savings accounts** (regular saver, cash ISA, other) are listed at the top of the Goals tab, with what each
+  goal holds in them and what's unassigned. Balances are entered by hand now and then; any change beyond the
+  transfers in between counts as interest. Also per account:
+  - a monthly standing order in, which shows in "Coming up" with a "Done" button (you can change the amount
+    each time) and stops at maturity
   - for an ISA, the £20,000 allowance used this tax year (from 6 April); a flexible ISA gets withdrawals back
   - for a regular saver, the monthly limit (per calendar month) and the maturity date, with a warning in the last 30 days
 
@@ -57,7 +68,9 @@ There's no build step. GitHub Pages serves the files as they are.
   (each one's plan, or more if you've gone over it) to get *free to spend*. Savings are one row per account:
   what's been moved in this period, plus the standing order still to go, plus whatever its goals still want
   beyond that. Money that was already in the account only counts towards a goal once it's assigned. Goals with
-  no account are one "Goals" row, as before.
+  no account (and straight-out goals paid from the current account) are one "Goals" row.
+  The Savings card lists each account's balance, how much of it is for goals and how much is unassigned.
+  The charts and past pay are in a History section at the bottom, closed to start with.
 - **Bank balance.** You enter your current account balance by hand (a second update on the same day replaces
   that day's). The Overview carries it forward to the day before payday: bills still to come out, income still to
   come in, savings still to move this month (standing orders on their dates), and what's left in budgets
@@ -78,8 +91,8 @@ Row-level security limits each user to their own rows.
 
 | Table | Columns | Notes |
 |---|---|---|
-| `goals` | `name`, `target`, `saved`, `category`, `target_date`, `monthly_amount`, `sort_order`, `archived` | `saved` is kept up to date by a trigger on `deposits`. Never write it directly. |
-| `deposits` | `goal_id`, `amount`, `note`, `external` | Negative = withdrawal, 0 = skipped month. `external` (migration 005) = from outside your income: counts towards the goal but not the current account or this month's plan. |
+| `goals` | `name`, `target`, `saved`, `category`, `target_date`, `monthly_amount`, `sort_order`, `archived`, `account_id`, `straight_out`, `monthly_day` | `saved` is what the goal has saved, kept up to date by a trigger on `deposits` (pay outs left out). Never write it directly. `target` empty = open-ended (migration 006). `account_id` is only the usual account. |
+| `deposits` | `goal_id`, `amount`, `note`, `external`, `account_id`, `paid_out`, `transfer_id` | Goal entries. Negative = taken out, 0 = skipped month. `external` (migration 005) = from outside your income. From migration 006: `account_id` = where the money is kept (null = current account), or for a straight-out goal where it was paid from; `paid_out` = spent (a pay out); `transfer_id` = the transfer that moved it, which several entries can share. |
 | `bills` | `name`, `amount`, `frequency`, `start_date`, `end_date`, `kind` (`bill` / `income`), `category`, `archived` | Also holds income sources and monthly pay. |
 | `bill_payments` | `bill_id`, `due_date`, `amount`, `paid_at` | One row per occurrence marked paid. |
 | `budgets` | `name`, `amount`, `sort_order`, `archived` | Added in migration 001. |
@@ -87,7 +100,7 @@ Row-level security limits each user to their own rows.
 | `balances` | `amount` | Added in migration 002. One row per balance update; the newest is the current one. Negative = overdrawn. |
 | `accounts` | `name`, `kind` (`saver` / `isa` / `other`), `standing_amount`, `standing_start`, `monthly_limit`, `matures_on`, `flexible`, `isa_paid_before`, `isa_paid_before_year`, `sort_order`, `archived` | Added in migration 003 (`isa_paid_*` in 004). Savings accounts; the current account isn't one. `isa_paid_before` is ISA money paid in before the account was added, counted only in the tax year `isa_paid_before_year` starts. |
 | `account_balances` | `account_id`, `amount` | Added in migration 003. Savings account balances as entered. |
-| `transfers` | `account_id`, `amount`, `moved_on`, `note`, `deposit_id`, `due_date`, `external` | Added in migration 003 (`external` in 005). Positive = into savings. `deposit_id` links one made by saving to a goal; `due_date` marks a standing order occurrence; `external` marks money paid in from outside your income, which doesn't come out of the current account. |
+| `transfers` | `account_id`, `amount`, `moved_on`, `note`, `deposit_id`, `due_date`, `external` | Added in migration 003 (`external` in 005). Positive = into savings. `due_date` marks a standing order occurrence; `external` = the other side isn't the current account (paid in from outside, paid out, or another savings account), so it doesn't move the current account. `deposit_id` is the old link to a goal entry, replaced by `deposits.transfer_id` in migration 006. |
 
 Migration 003 also adds `goals.account_id`, the account a goal's money is kept in.
 
@@ -107,6 +120,11 @@ Deploy the matching app code only *after* running the migration.
 - `002_balances.sql` creates `balances` for the bank balance on the Overview.
 - `003_accounts_transfers.sql` creates `accounts`, `account_balances` and `transfers`, and adds `goals.account_id`.
   Until it's run the app works as before, with savings accounts hidden.
+- `006_goal_entries_accounts_payouts.sql` adds `deposits.account_id`, `paid_out` and `transfer_id` (filled in
+  from existing data), `goals.straight_out` and `monthly_day`, lets `goals.target` be empty, and changes the
+  trigger so pay outs don't lower `saved`. The app needs it from the "Move money" release on.
+
+The `supabase/` folder isn't kept on GitHub, so these files are only in the local copy.
 
 ### Auth (email + password, and magic links)
 

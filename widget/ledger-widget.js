@@ -322,11 +322,12 @@ function savingsLayout(w, family, ctx) {
   const L = ctx.L;
   const accounts = L.liveAccounts().map(a => ({ a, info: L.accountInfo(a) }));
   const goals = sortedGoals(L);
-  const inGoals = goals.reduce((t, g) => t + g.saved, 0);
+  // What goals hold now (pay outs and straight-out goals' money have left), and how far the ones with targets are.
+  const inGoals = goals.reduce((t, g) => t + L.heldTotal(g), 0);
   const total = accounts.length ? accounts.reduce((t, x) => t + x.info.balance, 0) : inGoals;
   const targets = goals.reduce((t, g) => t + g.target, 0);
-  const goalPct = targets > 0 ? Math.min(100, (inGoals / targets) * 100) : 0;
-  const top = goals.find(g => !isDone(g)) || goals[0];
+  const top = goals.find(g => g.target > 0 && !isDone(g)) || goals.find(g => g.target > 0) || goals[0];
+  const ofTarget = g => g.target > 0 ? `${money(g.saved)} of ${money(g.target)}` : `${money(g.saved)} so far`;
 
   if (!accounts.length && !goals.length) return messageWidget(w, family, 'No savings yet', 'Add a savings account or a goal in the app.');
 
@@ -337,7 +338,7 @@ function savingsLayout(w, family, ctx) {
   } else if (family === 'accessoryRectangular') {
     addText(w, `${money(total)} saved`, Font.semiboldSystemFont(13), null, { scale: 0.7 });
     if (top) {
-      addText(w, `${top.name} · ${money(top.saved)} of ${money(top.target)}`, Font.regularSystemFont(11), null, { scale: 0.7 });
+      addText(w, `${top.name} · ${ofTarget(top)}`, Font.regularSystemFont(11), null, { scale: 0.7 });
       w.addSpacer(4);
       addBar(w, 140, pctOf(top), Color.white(), new Color('#ffffff', 0.3));
     }
@@ -369,7 +370,8 @@ function savingsLayout(w, family, ctx) {
       w.addSpacer(accounts.length ? (large ? 14 : 8) : 0);
       goals.slice(0, goalMax).forEach((g, i) => {
         if (i > 0) w.addSpacer(large ? 10 : 6);
-        addBarRow(w, `${isDone(g) ? '✓ ' : ''}${g.name}`, large ? `${money(g.saved)} / ${money(g.target)}` : `${pctOf(g).toFixed(0)}%`,
+        addBarRow(w, `${isDone(g) ? '✓ ' : ''}${g.name}`,
+          g.target > 0 ? (large ? `${money(g.saved)} / ${money(g.target)}` : `${pctOf(g).toFixed(0)}%`) : money(g.saved),
           pctOf(g), 285, { compact: !large, color: isDone(g) ? C.done : C.gold, sub: large ? goalLine(L, g) : null });
       });
     }

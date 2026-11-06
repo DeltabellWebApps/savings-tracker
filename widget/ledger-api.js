@@ -114,11 +114,11 @@ async function optional(path) {
 // Everything the widget and the quick spend script need, as raw rows.
 async function fetchRows() {
   const period = core.currentPayPeriod();
-  const since = encodeURIComponent(period.start.toISOString());
   const sinceDay = core.toISODate(period.start);
   const [goals, deposits, bills, payments, budgets, spends, balances, accounts, accountEntries, transfers] = await Promise.all([
     call('GET', 'goals?select=*&order=sort_order.asc'),
-    call('GET', `deposits?select=*&created_at=gte.${since}`),
+    // All goal entries, not just this period's: what each goal holds in each account adds them all up.
+    call('GET', 'deposits?select=*&order=created_at.asc'),
     call('GET', 'bills?select=*'),
     call('GET', 'bill_payments?select=*'),
     call('GET', 'budgets?select=*&order=sort_order.asc'),

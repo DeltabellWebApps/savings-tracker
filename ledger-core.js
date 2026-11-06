@@ -175,12 +175,24 @@
   }
 
   // ---------- Goals ----------
+  // `saved` is what a goal has saved (pay outs don't lower it). A goal with no target (target 0) is open-ended.
+  function hasTarget(g) {
+    return g.target > 0;
+  }
+
   function pctOf(g) {
-    return g.target > 0 ? Math.min(100, (g.saved / g.target) * 100) : 0;
+    return hasTarget(g) ? Math.min(100, (g.saved / g.target) * 100) : 0;
   }
 
   function isDone(g) {
-    return g.target > 0 && g.saved >= g.target;
+    return hasTarget(g) && g.saved >= g.target;
+  }
+
+  // The dates in [from, to] for a goal with a day of the month set, or [] without one.
+  function goalDaysBetween(goal, from, to) {
+    if (!goal.monthlyDay) return [];
+    const schedule = { startDate: `2000-01-${String(goal.monthlyDay).padStart(2, '0')}`, frequency: 'monthly' };
+    return occurrencesBetween(schedule, from, to);
   }
 
   // What a goal asks for this pay period. It's worked out from where the goal stood when the period began,
@@ -195,12 +207,24 @@
   //   afterSkip — the monthly amount needed from next period if this one is skipped
   //   projection — a short forecast line (finish month, or ahead/behind a steady pace), or null;
   //                `behindBy` holds the amount when it's behind
+  // Pay outs (`paidOut`) don't count here: spending a goal's money doesn't undo the saving.
+  // A goal with no target asks for its monthly amount every period, and has no `remaining` (null).
   function goalPlan(goal, deposits) {
     const period = currentPayPeriod();
-    const mine = (deposits || []).filter(d => d.goalId === goal.id && new Date(d.createdAt) >= period.start);
+    const mine = (deposits || []).filter(d => d.goalId === goal.id && !d.paidOut && new Date(d.createdAt) >= period.start);
     const skip = mine.find(d => d.amount === 0 && !d.external) || null;
     const savedThisPeriod = mine.filter(d => !d.external).reduce((s, d) => s + d.amount, 0);
     const fromOutside = mine.filter(d => d.external).reduce((s, d) => s + d.amount, 0);
+
+    if (!hasTarget(goal)) {
+      const planned = goal.monthlyAmount || 0;
+      const committed = skip ? Math.max(0, savedThisPeriod) : Math.max(planned, savedThisPeriod);
+      return {
+        planned, savedThisPeriod, fromOutside, skip, remaining: null, overdue: false, dueLabel: null,
+        afterSkip: planned, committed, projection: null
+      };
+    }
+
     const remaining = goal.target - goal.saved;
     const remainingAtStart = remaining + savedThisPeriod + fromOutside;
     const plan = { planned: 0, savedThisPeriod, fromOutside, skip, remaining, overdue: false, dueLabel: null, afterSkip: 0 };
@@ -358,13 +382,14 @@
   const num = v => v == null ? null : Number(v);
   const fromRow = {
     goal: r => ({
-      id: r.id, name: r.name, target: Number(r.target), saved: Number(r.saved), category: r.category || '',
+      id: r.id, name: r.name, target: r.target == null ? 0 : Number(r.target), saved: Number(r.saved), category: r.category || '',
       targetDate: r.target_date || null, monthlyAmount: num(r.monthly_amount),
       sortOrder: r.sort_order == null ? 0 : Number(r.sort_order), archived: !!r.archived,
-      accountId: r.account_id || null, createdAt: r.created_at
+      accountId: r.account_id || null, straightOut: !!r.straight_out, monthlyDay: num(r.monthly_day), createdAt: r.created_at
     }),
     deposit: r => ({
-      id: r.id, goalId: r.goal_id, amount: Number(r.amount), note: r.note || '', external: !!r.external, createdAt: r.created_at
+      id: r.id, goalId: r.goal_id, amount: Number(r.amount), note: r.note || '', external: !!r.external,
+      accountId: r.account_id || null, paidOut: !!r.paid_out, transferId: r.transfer_id || null, createdAt: r.created_at
     }),
     bill: r => ({
       id: r.id, name: r.name, amount: Number(r.amount), frequency: r.frequency, startDate: r.start_date,
@@ -429,17 +454,52 @@
       return { spent, left: budget.amount - spent, over: spent > budget.amount, committed: Math.max(budget.amount, spent) };
     };
 
-    // The live account a goal's money is kept in, or null (goals with none work as they did before accounts).
+    // A goal's usual account: where its money is kept, or for a straight-out goal where it's usually paid from.
+    // Null for none (the current account). It's only the default: each entry records its own account.
     L.accountOf = goal => goal && goal.accountId ? L.liveAccounts().find(a => a.id === goal.accountId) || null : null;
+    // The account whose money this period's plan moves: none for a straight-out goal, whose money leaves the
+    // current account (or whichever account it's paid from) and is never kept.
+    L.planAccount = goal => goal && !goal.straightOut ? L.accountOf(goal) : null;
+    // Goals whose plan is paid straight from the current account: no savings account, or straight-out ones
+    // paid from it. (A straight-out goal usually paid from savings doesn't touch this month's income.)
+    L.fromCurrent = goal => !L.accountOf(goal);
 
-    // An account's balance, interest and allowances (see accountState), plus the goals kept in it and what's in
-    // it that no goal has claimed.
+    // What a goal holds now, per account: what it saved there, less what was paid out or moved away.
+    // Keys are account ids, '' for the current account. A straight-out goal holds nothing.
+    L.goalHeld = goal => {
+      const held = new Map();
+      if (goal.straightOut) return held;
+      data.deposits.forEach(d => {
+        if (d.goalId !== goal.id || d.amount === 0) return;
+        const key = d.accountId || '';
+        held.set(key, (held.get(key) || 0) + d.amount);
+      });
+      held.forEach((v, k) => { if (Math.abs(v) < 0.005) held.delete(k); });
+      return held;
+    };
+    L.heldIn = (goal, accountId) => L.goalHeld(goal).get(accountId || '') || 0;
+    L.heldTotal = goal => [...L.goalHeld(goal).values()].reduce((s, v) => s + v, 0);
+    // What has been paid out of a goal (positive), and what has gone to it in all.
+    L.paidOut = goal => -data.deposits.filter(d => d.goalId === goal.id && d.paidOut).reduce((s, d) => s + d.amount, 0);
+
+    // An account's balance, interest and allowances (see accountState), plus the goals with money kept in it (or
+    // that keep their money there by default), what each holds here, and what's in it that no goal has claimed.
     L.accountInfo = account => {
       const state = accountState(account, data.accountEntries, data.transfers, startOfToday());
-      const goalsIn = L.liveGoals().filter(g => g.accountId === account.id);
-      const inGoals = goalsIn.reduce((s, g) => s + g.saved, 0);
-      return { ...state, goalsIn, inGoals, unassigned: state.balance - inGoals };
+      const heldBy = new Map();
+      const goalsIn = L.liveGoals().filter(g => {
+        if (g.straightOut) return false;
+        const here = L.heldIn(g, account.id);
+        if (Math.abs(here) < 0.005 && g.accountId !== account.id) return false;
+        heldBy.set(g.id, here);
+        return true;
+      });
+      const inGoals = [...heldBy.values()].reduce((s, v) => s + v, 0);
+      return { ...state, goalsIn, heldBy, inGoals, unassigned: state.balance - inGoals };
     };
+
+    // Goal money kept in the current account (goals with no savings account), for the Overview.
+    L.heldInCurrent = () => L.liveGoals().reduce((s, g) => s + L.heldIn(g, null), 0);
 
     // Standing order dates in [from, to], from the day the account was added.
     L.standingBetween = (account, from, to) => {
@@ -468,7 +528,7 @@
         .reduce((s, t) => s + t.amount, 0);
       const unpaidStanding = L.standingBetween(account, period.start, period.end).filter(d => !L.standingDone(account, d));
       const standingLeft = unpaidStanding.length * (account.standingAmount || 0);
-      const goalsLeft = info.goalsIn.reduce((s, g) => {
+      const goalsLeft = L.liveGoals().filter(g => L.planAccount(g) === account).reduce((s, g) => {
         const p = L.goalPlan(g);
         return s + (p.skip ? 0 : Math.max(0, p.planned - Math.max(0, p.savedThisPeriod)));
       }, 0);
@@ -505,15 +565,19 @@
           else if (!p && d >= trackFrom(b)) add('bills', d < today ? today : d, -b.amount);
         });
       });
+      // Goal entries that leave the current account: ones kept in it or paid straight out of it. Entries tied to
+      // a transfer are counted through the transfer; pay outs from money already set aside don't move it again.
       const paired = new Set(data.transfers.map(t => t.depositId).filter(Boolean));
-      const goalById = new Map(data.goals.map(g => [g.id, g]));
-      data.deposits.filter(d => new Date(d.createdAt) > at && !d.external && !paired.has(d.id) && !L.accountOf(goalById.get(d.goalId)))
+      data.deposits.filter(d => new Date(d.createdAt) > at && !d.external && !d.paidOut && !d.accountId &&
+        !d.transferId && !paired.has(d.id))
         .forEach(d => add('goals', dayOf(d.createdAt), -d.amount));
       data.transfers.filter(t => transferTime(t) > at && !t.external).forEach(t => add('goals', parseLocalDate(t.movedOn), -t.amount));
-      L.liveGoals().filter(g => !L.accountOf(g)).forEach(g => {
+      L.liveGoals().filter(L.fromCurrent).forEach(g => {
         const plan = L.goalPlan(g);
         const toSave = plan.skip ? 0 : Math.max(0, plan.planned - Math.max(0, plan.savedThisPeriod));
-        if (toSave > 0) add('goals', today, -toSave);
+        if (toSave <= 0) return;
+        const day = goalDaysBetween(g, period.start, period.end)[0];
+        add('goals', day && day > today ? day : today, -toSave);
       });
       L.liveAccounts().forEach(a => {
         const s = L.accountSaving(a, period);
@@ -566,7 +630,7 @@
       const leftOver = income - billsTotal - potMonthly;
 
       const looseGoals = { committed: 0, saved: 0, skipped: 0 };
-      L.liveGoals().filter(g => !L.accountOf(g)).forEach(g => {
+      L.liveGoals().filter(L.fromCurrent).forEach(g => {
         const plan = L.goalPlan(g);
         looseGoals.committed += plan.committed;
         looseGoals.saved += Math.max(0, plan.savedThisPeriod);
@@ -615,6 +679,13 @@
       });
       L.liveAccounts().forEach(a => L.standingBetween(a, period.start, period.end).filter(d => !L.standingDone(a, d))
         .forEach(d => items.push({ kind: 'standing', id: a.id, name: `${a.name} standing order`, amount: a.standingAmount, date: d })));
+      // Goals with a day of the month: what this period's plan still wants, on that day.
+      L.liveGoals().filter(g => g.monthlyDay).forEach(g => {
+        const plan = L.goalPlan(g);
+        const left = plan.skip ? 0 : plan.planned - Math.max(0, plan.savedThisPeriod);
+        const day = goalDaysBetween(g, period.start, period.end)[0];
+        if (left > 0.005 && day) items.push({ kind: 'goal', id: g.id, name: g.name, amount: left, date: day });
+      });
       return items.sort((x, y) => x.date - y.date);
     };
 
@@ -628,6 +699,7 @@
     FREQUENCY_LABELS, PER_MONTH, AVG_MONTH_MS,
     parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth, monthShort,
     occurrence, occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage,
-    isPotBill, yearlyBillsPot, payPeriodFor, currentPayPeriod, balanceForecast, formatMoney, pctOf, isDone, goalPlan
+    isPotBill, yearlyBillsPot, payPeriodFor, currentPayPeriod, balanceForecast, formatMoney, hasTarget, pctOf, isDone,
+    goalPlan, goalDaysBetween
   };
 });
