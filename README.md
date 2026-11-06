@@ -52,7 +52,8 @@ There's no build step. GitHub Pages serves the files as they are.
   account all open it filled in. The rules for what it records are in the comment above `openMoveSheet()` in
   `index.html`.
 - **Savings accounts** (regular saver, cash ISA, other) are listed at the top of the Goals tab, with what each
-  goal holds in them and what's unassigned. Balances are entered by hand now and then; any change beyond the
+  goal holds in them and what's unassigned. "edit" on a goal's line sets how much of the account is that goal's:
+  the difference comes from or goes back to unassigned (one goal entry, nothing moves between accounts). Balances are entered by hand now and then; any change beyond the
   transfers in between counts as interest. Also per account:
   - a monthly standing order in, which shows in "Coming up" with a "Done" button (you can change the amount
     each time) and stops at maturity

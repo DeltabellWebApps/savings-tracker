@@ -933,6 +933,22 @@
   </div>
 </div>
 
+<!-- Assigned Amount Sheet: how much of a savings account one goal claims -->
+<div class="overlay" id="heldOverlay">
+  <div class="sheet">
+    <h2 id="heldSheetTitle">Assigned</h2>
+    <div class="field">
+      <label for="heldAmountInput" id="heldAmountLabel">Amount for this goal</label>
+      <input id="heldAmountInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
+      <div class="field-hint" id="heldHint"></div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="cancelHeld">Cancel</button>
+      <button class="btn-primary" id="saveHeld">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Monthly Pay Sheet -->
 <div class="overlay" id="payOverlay">
   <div class="sheet">
@@ -1773,7 +1789,10 @@
       const lines = info.goalsIn.map(g => `
         <div class="statement-row">
           <div>${escapeHtml(g.name)}</div>
-          <div class="amt">${formatMoney(info.heldBy.get(g.id))}</div>
+          <div class="row-end">
+            <div class="amt">${formatMoney(info.heldBy.get(g.id))}</div>
+            <button class="btn-icon edit-held" data-goal="${g.id}" data-account="${a.id}">edit</button>
+          </div>
         </div>`);
       const anyGoals = liveGoals().some(g => !g.straightOut);
       if (!info.goalsIn.length || Math.abs(info.unassigned) >= 0.005) {
@@ -1861,6 +1880,7 @@
     el.querySelectorAll('.account-move').forEach(btn => btn.addEventListener('click', () => openMoveSheet({ from: 'current', to: btn.dataset.id })));
     el.querySelectorAll('.account-history').forEach(btn => btn.addEventListener('click', () => openAccountHistory(btn.dataset.id)));
     el.querySelectorAll('.assign-account').forEach(btn => btn.addEventListener('click', () => openAssign(btn.dataset.id)));
+    el.querySelectorAll('.edit-held').forEach(btn => btn.addEventListener('click', () => openHeldSheet(btn.dataset.goal, btn.dataset.account)));
     el.querySelectorAll('.standing-done').forEach(btn => btn.addEventListener('click', () => markStandingDone(btn)));
   }
 
@@ -2649,6 +2669,78 @@
       showToast('Entry deleted');
     } catch (e) {
       showToast("Couldn't delete — check your connection");
+    }
+  });
+
+  // ---------- Assigned amount sheet ----------
+  // Sets how much of a savings account one goal claims. Nothing moves between accounts: the difference is
+  // recorded as one goal entry in that account (an assign, or a negative one that hands money back), so it
+  // comes from, or goes back to, the account's unassigned money. Lowering it lowers what the goal has saved.
+  const heldOverlay = document.getElementById('heldOverlay');
+  const heldAmountInput = document.getElementById('heldAmountInput');
+  let heldEdit = null; // { goal, account, held, unassigned }
+
+  function openHeldSheet(goalId, accountId) {
+    const goal = goals.find(g => g.id === goalId);
+    const account = accounts.find(a => a.id === accountId);
+    const info = accountInfo(account);
+    heldEdit = { goal, account, held: heldIn(goal, accountId), unassigned: info.unassigned };
+    document.getElementById('heldSheetTitle').textContent = `${goal.name} in ${account.name}`;
+    document.getElementById('heldAmountLabel').textContent = `Amount of ${account.name} for ${goal.name}`;
+    heldAmountInput.value = Math.round(heldEdit.held * 100) / 100;
+    syncHeldHint();
+    heldOverlay.classList.add('open');
+    setTimeout(() => heldAmountInput.select(), 100);
+  }
+
+  function syncHeldHint() {
+    const { goal, account, held, unassigned } = heldEdit;
+    const value = parseFloat(heldAmountInput.value);
+    const diff = (Number.isFinite(value) ? value : held) - held;
+    const room = Math.max(0, unassigned);
+    document.getElementById('heldHint').textContent = Math.abs(diff) < 0.005
+      ? `${formatMoney(room)} in ${account.name} isn't assigned to a goal. Nothing moves between accounts.`
+      : diff > 0
+        ? diff > room + 0.005
+          ? `That's ${formatMoney(diff - room)} more than the ${formatMoney(room)} unassigned in ${account.name}.`
+          : `${formatMoney(diff)} of the unassigned money goes to ${goal.name}. Nothing moves between accounts.`
+        : `${formatMoney(-diff)} goes back to unassigned in ${account.name}, and comes off what ${goal.name} has saved.`;
+  }
+  heldAmountInput.addEventListener('input', syncHeldHint);
+
+  function closeHeldSheet() {
+    heldOverlay.classList.remove('open');
+    heldEdit = null;
+  }
+  document.getElementById('cancelHeld').addEventListener('click', closeHeldSheet);
+  heldOverlay.addEventListener('click', (e) => { if (e.target === heldOverlay) closeHeldSheet(); });
+
+  document.getElementById('saveHeld').addEventListener('click', async () => {
+    if (!heldEdit) return;
+    const { goal, account, held, unassigned } = heldEdit;
+    const value = parseFloat(heldAmountInput.value);
+    if (!(value >= 0)) { showToast('Enter an amount, or 0'); return; }
+    const diff = Math.round((value - held) * 100) / 100;
+    if (Math.abs(diff) < 0.005) { closeHeldSheet(); return; }
+    if (diff > Math.max(0, unassigned) + 0.005) {
+      showToast(`Only ${formatMoney(Math.max(0, unassigned))} in ${account.name} is unassigned`);
+      return;
+    }
+    const saveBtn = document.getElementById('saveHeld');
+    saveBtn.disabled = true;
+    try {
+      const [dep] = await insertDepositsRemote([{
+        goal_id: goal.id, amount: diff, account_id: account.id, note: diff > 0 ? 'Assigned' : 'Unassigned'
+      }]);
+      allDeposits.push(dep);
+      goal.saved += diff;
+      render();
+      closeHeldSheet();
+      showToast(`${goal.name}: ${formatMoney(value)} in ${account.name}`);
+    } catch (e) {
+      showToast("Couldn't save — check your connection");
+    } finally {
+      saveBtn.disabled = false;
     }
   });
 
