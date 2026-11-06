@@ -52,9 +52,10 @@ There's no build step. GitHub Pages serves the files as they are.
   account all open it filled in. The rules for what it records are in the comment above `openMoveSheet()` in
   `index.html`.
 - **Savings accounts** (regular saver, cash ISA, other) are listed at the top of the Goals tab, with what each
-  goal holds in them and what's unassigned. "edit" on a goal's line sets how much of the account is that goal's:
-  the difference comes from or goes back to unassigned (one goal entry, nothing moves between accounts). Balances are entered by hand now and then; any change beyond the
-  transfers in between counts as interest. Also per account:
+  goal holds in them and what's unassigned. "edit" on a goal's line sets how much of the account is that goal's,
+  with a date, or removes it: the difference comes from or goes back to unassigned (one goal entry, nothing moves
+  between accounts). Balances are entered by hand now and then; any change beyond the transfers in between
+  counts as interest. Also per account:
   - a monthly standing order in, which shows in "Coming up" with a "Done" button (you can change the amount
     each time) and stops at maturity
   - for an ISA, the £20,000 allowance used this tax year (from 6 April); a flexible ISA gets withdrawals back
@@ -62,6 +63,11 @@ There's no build step. GitHub Pages serves the files as they are.
 
   Interest outside ISAs is shown against the £1,000 Personal Savings Allowance. The rules are in
   `accountState()` in `ledger-core.js` and `accountSaving()` in `index.html`.
+- **What counts against this month's pay.** Only goal money that left the current account this pay period: kept
+  in it, paid straight out of it, or moved by a transfer from it. Assigning money that was already in a savings
+  account, money from outside your income and moves between accounts count towards the goal but not this month's
+  plan, like cashback. An entry dated before payday belongs to the previous period; goal entries' dates can be
+  changed from the goal's History. The rule is `fromIncome` in `ledger-core.js`.
 - **Budgets** are monthly allowances (e.g. Groceries £300). They reset each payday, and spends are logged against them.
   The Budgets tab charts spending per pay period over the last six (all budgets, or one you tap), and each
   budget's average over the finished ones against its allowance. Past periods use today's allowances.

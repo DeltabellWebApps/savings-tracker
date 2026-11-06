@@ -526,6 +526,45 @@
     font-weight: 500;
   }
   .btn-secondary:active { opacity: 0.7; }
+
+  /* Archive / delete / remove in a sheet: a quiet row well below Save, split off by a rule, so they're never
+     tapped by mistake. Each still asks first. */
+  .sheet-actions.sheet-danger {
+    margin-top: 32px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .sheet-danger .btn-secondary,
+  .sheet-danger .btn-delete {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 12px 2px;
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    font-weight: 400;
+  }
+  .sheet-danger .btn-secondary { color: var(--ink-soft); }
+  .sheet-danger .btn-delete { color: var(--danger); margin-left: auto; }
+
+  /* Confirming something that can't be undone: Cancel is the big button, and the red one is small and off to
+     the side, so a double tap on the button that opened it lands on Cancel. */
+  #confirmOverlay.danger #confirmCancel {
+    flex: 1;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-weight: 500;
+  }
+  #confirmOverlay.danger #confirmOk {
+    order: -1;
+    flex: 0 0 auto;
+    padding: 13px 18px;
+    background: transparent;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+  }
   .archive-toggle {
     display: block;
     width: 100%;
@@ -761,8 +800,8 @@
       <button class="btn-cancel" id="cancelBill">Cancel</button>
       <button class="btn-primary" id="saveBill">Save bill</button>
     </div>
-    <div class="sheet-actions" id="deleteBillRow" style="display:none; margin-top: 10px;">
-      <button class="btn-secondary" id="archiveBill">Archive</button>
+    <div class="sheet-actions sheet-danger" id="deleteBillRow" style="display:none;">
+      <button class="btn-secondary" id="archiveBill">Archive bill</button>
       <button class="btn-delete" id="deleteBill">Delete this bill</button>
     </div>
   </div>
@@ -812,8 +851,8 @@
       <button class="btn-cancel" id="cancelBudget">Cancel</button>
       <button class="btn-primary" id="saveBudget">Save budget</button>
     </div>
-    <div class="sheet-actions" id="deleteBudgetRow" style="display:none; margin-top: 10px;">
-      <button class="btn-secondary" id="archiveBudget">Archive</button>
+    <div class="sheet-actions sheet-danger" id="deleteBudgetRow" style="display:none;">
+      <button class="btn-secondary" id="archiveBudget">Archive budget</button>
       <button class="btn-delete" id="deleteBudget">Delete this budget</button>
     </div>
   </div>
@@ -840,7 +879,7 @@
       <button class="btn-cancel" id="cancelSpend">Cancel</button>
       <button class="btn-primary" id="saveSpend">Add</button>
     </div>
-    <div class="sheet-actions" id="deleteSpendRow" style="display:none; margin-top: 10px;">
+    <div class="sheet-actions sheet-danger" id="deleteSpendRow" style="display:none;">
       <button class="btn-delete" id="deleteSpend">Delete this entry</button>
     </div>
   </div>
@@ -903,8 +942,8 @@
       <button class="btn-cancel" id="cancelGoal">Cancel</button>
       <button class="btn-primary" id="saveGoal">Save goal</button>
     </div>
-    <div class="sheet-actions" id="deleteGoalRow" style="display:none; margin-top: 10px;">
-      <button class="btn-secondary" id="archiveGoal">Archive</button>
+    <div class="sheet-actions sheet-danger" id="deleteGoalRow" style="display:none;">
+      <button class="btn-secondary" id="archiveGoal">Archive goal</button>
       <button class="btn-delete" id="deleteGoal">Delete this goal</button>
     </div>
   </div>
@@ -920,6 +959,11 @@
       <div class="field-hint" id="depositHint"></div>
     </div>
     <div class="field">
+      <label for="depositDateInput">Date</label>
+      <input id="depositDateInput" type="date">
+      <div class="field-hint">The pay period it falls in decides which month's plan it counts towards.</div>
+    </div>
+    <div class="field">
       <label for="depositNoteInput">Note (optional)</label>
       <input id="depositNoteInput" type="text" placeholder="e.g. birthday money" maxlength="60">
     </div>
@@ -927,7 +971,7 @@
       <button class="btn-cancel" id="cancelDeposit">Cancel</button>
       <button class="btn-primary" id="saveDeposit">Save</button>
     </div>
-    <div class="sheet-actions" id="deleteDepositRow" style="display:none; margin-top: 10px;">
+    <div class="sheet-actions sheet-danger" id="deleteDepositRow" style="display:none;">
       <button class="btn-delete" id="deleteDeposit">Delete this entry</button>
     </div>
   </div>
@@ -951,7 +995,7 @@
       <button class="btn-cancel" id="cancelHeld">Cancel</button>
       <button class="btn-primary" id="saveHeld">Save</button>
     </div>
-    <div class="sheet-actions" style="margin-top: 10px;">
+    <div class="sheet-actions sheet-danger">
       <button class="btn-delete" id="removeHeld">Remove from account</button>
     </div>
   </div>
@@ -970,7 +1014,7 @@
       <button class="btn-cancel" id="cancelPay">Cancel</button>
       <button class="btn-primary" id="savePay">Save</button>
     </div>
-    <div class="sheet-actions" id="deletePayRow" style="display:none; margin-top: 10px;">
+    <div class="sheet-actions sheet-danger" id="deletePayRow" style="display:none;">
       <button class="btn-delete" id="deletePay">Delete this pay</button>
     </div>
   </div>
@@ -1046,8 +1090,8 @@
       <button class="btn-cancel" id="cancelAccount">Cancel</button>
       <button class="btn-primary" id="saveAccount">Save account</button>
     </div>
-    <div class="sheet-actions" id="deleteAccountRow" style="display:none; margin-top: 10px;">
-      <button class="btn-secondary" id="archiveAccount">Archive</button>
+    <div class="sheet-actions sheet-danger" id="deleteAccountRow" style="display:none;">
+      <button class="btn-secondary" id="archiveAccount">Archive account</button>
       <button class="btn-delete" id="deleteAccount">Delete this account</button>
     </div>
   </div>
@@ -1150,7 +1194,7 @@
       <button class="btn-cancel" id="cancelTransfer">Cancel</button>
       <button class="btn-primary" id="saveTransfer">Save</button>
     </div>
-    <div class="sheet-actions" id="deleteTransferRow" style="display:none; margin-top: 10px;">
+    <div class="sheet-actions sheet-danger" id="deleteTransferRow" style="display:none;">
       <button class="btn-delete" id="deleteTransfer">Delete this transfer</button>
     </div>
   </div>
@@ -1505,13 +1549,16 @@
   const confirmOverlay = document.getElementById('confirmOverlay');
   const confirmOk = document.getElementById('confirmOk');
   let confirmResolve = null;
+  let confirmOpenedAt = 0;
 
+  // `danger` (deleting, removing, archiving) makes Cancel the big button and the action a small red one.
   function askConfirm(title, message, okLabel, danger) {
     document.getElementById('confirmTitle').textContent = title;
     document.getElementById('confirmMessage').textContent = message;
     confirmOk.textContent = okLabel;
-    confirmOk.classList.toggle('btn-danger', !!danger);
+    confirmOverlay.classList.toggle('danger', !!danger);
     confirmOverlay.classList.add('open');
+    confirmOpenedAt = Date.now();
     return new Promise(resolve => { confirmResolve = resolve; });
   }
 
@@ -1521,7 +1568,8 @@
     confirmResolve = null;
   }
 
-  confirmOk.addEventListener('click', () => closeConfirm(true));
+  // A tap within half a second of the sheet opening is the second half of a double tap, not a decision.
+  confirmOk.addEventListener('click', () => { if (Date.now() - confirmOpenedAt > 500) closeConfirm(true); });
   document.getElementById('confirmCancel').addEventListener('click', () => closeConfirm(false));
   confirmOverlay.addEventListener('click', (e) => { if (e.target === confirmOverlay) closeConfirm(false); });
 
@@ -1561,10 +1609,17 @@
     el.querySelectorAll('.unarchive').forEach(btn => btn.addEventListener('click', () => setArchived(key, btn.dataset.id, false)));
   }
 
-  // Archived items drop out of every list, total and chart, but keep their history.
+  // Archived items drop out of every list, total and chart, but keep their history. Archiving asks first.
   async function setArchived(key, id, archived) {
     const list = { goals, bills, budgets, accounts }[key];
     const item = list.find(x => x.id === id);
+    if (archived) {
+      const where = { goals: 'Goals', bills: 'Bills', budgets: 'Budgets', accounts: 'Goals' }[key];
+      const ok = await askConfirm(`Archive ${item.name}?`,
+        `It's hidden from every list and total, but keeps its history. You can restore it from "Archived" at the bottom of the ${where} tab.`,
+        'Archive', true);
+      if (!ok) return false;
+    }
     try {
       await saveRow(key, id, { archived });
       item.archived = archived;
@@ -1697,7 +1752,7 @@
       else if (plan.savedThisPeriod > 0 && plan.planned > 0) suggestion = `${formatMoney(plan.savedThisPeriod)} of ${formatMoney(plan.planned)} ${g.straightOut ? 'paid' : 'saved'} this month${by}`;
       else if (plan.planned > 0) suggestion = `${g.straightOut ? 'Pay' : 'Save'} ${formatMoney(plan.planned)}/mo${by}${g.monthlyDay ? ` · due on the ${ordinal(g.monthlyDay)}` : ''}`;
       if (Math.abs(plan.fromOutside) >= 0.005 && !plan.overdue) {
-        suggestion += `${suggestion ? ' · ' : ''}${plan.fromOutside > 0 ? '+' : '−'}${formatMoney(Math.abs(plan.fromOutside))} from outside this month`;
+        suggestion += `${suggestion ? ' · ' : ''}${plan.fromOutside > 0 ? '+' : '−'}${formatMoney(Math.abs(plan.fromOutside))} this month not from pay`;
       }
       const suggestionHtml = suggestion ? `<div class="suggestion-line ${plan.overdue ? 'overdue' : ''}">${suggestion}</div>` : '';
       const projectionHtml = plan.projection
@@ -2580,6 +2635,7 @@
   const depositOverlay = document.getElementById('depositOverlay');
   const depositAmountInput = document.getElementById('depositAmountInput');
   const depositNoteInput = document.getElementById('depositNoteInput');
+  const depositDateInput = document.getElementById('depositDateInput');
   const depositSheetTitle = document.getElementById('depositSheetTitle');
   const deleteDepositRow = document.getElementById('deleteDepositRow');
   const depositHint = document.getElementById('depositHint');
@@ -2602,6 +2658,7 @@
     depositSheetTitle.textContent = `Edit entry — ${g.name}`;
     depositAmountInput.value = dep.amount;
     depositNoteInput.value = dep.note || '';
+    depositDateInput.value = toISODate(new Date(dep.createdAt));
     depositHint.textContent = !t
       ? (dep.paidOut ? 'A pay out. Enter it as a negative number.' : 'Enter a negative number to correct it.')
       : whole
@@ -2626,6 +2683,12 @@
     const amount = parseFloat(depositAmountInput.value);
     const note = depositNoteInput.value.trim();
     if (!amount) { showToast('Enter an amount'); return; }
+    const date = depositDateInput.value;
+    if (!date || hasBadDate(depositDateInput)) { showToast('Enter the date'); return; }
+    if (date > toISODate(startOfToday())) { showToast("The date can't be in the future"); return; }
+    // A new date is stored as midday that day; an unchanged one keeps its exact time.
+    const redated = date !== toISODate(new Date(dep.createdAt));
+    const createdAt = redated ? new Date(`${date}T12:00:00`).toISOString() : dep.createdAt;
     if (dep.amount !== 0 && Math.sign(amount) !== Math.sign(dep.amount)) {
       showToast('To turn it the other way, delete it and enter it again');
       return;
@@ -2635,7 +2698,7 @@
     const saveBtn = document.getElementById('saveDeposit');
     saveBtn.disabled = true;
     try {
-      await updateDepositRemote(dep.id, { amount, note: note || null });
+      await updateDepositRemote(dep.id, { amount, note: note || null, ...(redated ? { created_at: createdAt } : {}) });
       // The database adjusts the goal's saved total itself (pay outs aside); mirror it locally.
       if (!dep.paidOut) g.saved += amount - dep.amount;
       if (t && whole && Math.abs(Math.abs(t.amount) - Math.abs(amount)) >= 0.005) {
@@ -2643,7 +2706,12 @@
         await saveRow('transfers', t.id, { amount: moved });
         t.amount = moved;
       }
-      Object.assign(dep, { amount, note });
+      if (t && whole && redated) {
+        await saveRow('transfers', t.id, { moved_on: date });
+        t.movedOn = date;
+      }
+      Object.assign(dep, { amount, note, createdAt });
+      allDeposits.sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
       render();
       closeDepositSheet();
       showToast('Entry updated');

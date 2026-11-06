@@ -209,12 +209,15 @@
   //                `behindBy` holds the amount when it's behind
   // Pay outs (`paidOut`) don't count here: spending a goal's money doesn't undo the saving.
   // A goal with no target asks for its monthly amount every period, and has no `remaining` (null).
-  function goalPlan(goal, deposits) {
+  // `fromIncome(d)`, if given, says whether an entry's money left the current account; entries it rejects are
+  // treated like `external` ones (e.g. assigning money that was already in a savings account).
+  function goalPlan(goal, deposits, fromIncome) {
     const period = currentPayPeriod();
     const mine = (deposits || []).filter(d => d.goalId === goal.id && !d.paidOut && new Date(d.createdAt) >= period.start);
+    const outside = d => d.external || (fromIncome && d.amount !== 0 && !fromIncome(d));
     const skip = mine.find(d => d.amount === 0 && !d.external) || null;
-    const savedThisPeriod = mine.filter(d => !d.external).reduce((s, d) => s + d.amount, 0);
-    const fromOutside = mine.filter(d => d.external).reduce((s, d) => s + d.amount, 0);
+    const savedThisPeriod = mine.filter(d => !outside(d)).reduce((s, d) => s + d.amount, 0);
+    const fromOutside = mine.filter(outside).reduce((s, d) => s + d.amount, 0);
 
     if (!hasTarget(goal)) {
       const planned = goal.monthlyAmount || 0;
@@ -446,7 +449,19 @@
     L.liveBudgets = () => data.budgets.filter(b => !b.archived);
     L.liveAccounts = () => data.accounts.filter(a => !a.archived);
 
-    L.goalPlan = goal => goalPlan(goal, data.deposits);
+    // Whether a goal entry's money came out of the current account (so out of this period's income):
+    //   kept in the current account, or paid straight out of it — no savings account and no transfer; or
+    //   moved into savings by a transfer from the current account.
+    // Not: money from outside your income, pay outs, money that was already in a savings account and was only
+    // assigned, or a goal's money moved between accounts.
+    L.fromIncome = d => {
+      if (d.external || d.paidOut) return false;
+      const t = d.transferId ? data.transfers.find(x => x.id === d.transferId)
+        : data.transfers.find(x => x.depositId === d.id);
+      if (t) return !t.external && t.amount > 0;
+      return !d.accountId;
+    };
+    L.goalPlan = goal => goalPlan(goal, data.deposits, L.fromIncome);
 
     // What a budget has used this pay period. `committed` is what the Overview sets aside: the allowance, or more if overspent.
     L.budgetUse = budget => {
