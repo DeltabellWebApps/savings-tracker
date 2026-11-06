@@ -942,9 +942,17 @@
       <input id="heldAmountInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
       <div class="field-hint" id="heldHint"></div>
     </div>
+    <div class="field">
+      <label for="heldDateInput">Date</label>
+      <input id="heldDateInput" type="date">
+      <div class="field-hint">When the money was set aside. Leave it as today if you're not sure.</div>
+    </div>
     <div class="sheet-actions">
       <button class="btn-cancel" id="cancelHeld">Cancel</button>
       <button class="btn-primary" id="saveHeld">Save</button>
+    </div>
+    <div class="sheet-actions" style="margin-top: 10px;">
+      <button class="btn-delete" id="removeHeld">Remove from account</button>
     </div>
   </div>
 </div>
@@ -2673,11 +2681,13 @@
   });
 
   // ---------- Assigned amount sheet ----------
-  // Sets how much of a savings account one goal claims. Nothing moves between accounts: the difference is
-  // recorded as one goal entry in that account (an assign, or a negative one that hands money back), so it
-  // comes from, or goes back to, the account's unassigned money. Lowering it lowers what the goal has saved.
+  // Sets how much of a savings account one goal claims, or removes the goal from the account. Nothing moves
+  // between accounts: the difference is recorded as one goal entry in that account (an assign, or a negative one
+  // that hands money back), dated the day chosen, so it comes from or goes back to the account's unassigned money.
+  // Lowering it lowers what the goal has saved.
   const heldOverlay = document.getElementById('heldOverlay');
   const heldAmountInput = document.getElementById('heldAmountInput');
+  const heldDateInput = document.getElementById('heldDateInput');
   let heldEdit = null; // { goal, account, held, unassigned }
 
   function openHeldSheet(goalId, accountId) {
@@ -2687,7 +2697,10 @@
     heldEdit = { goal, account, held: heldIn(goal, accountId), unassigned: info.unassigned };
     document.getElementById('heldSheetTitle').textContent = `${goal.name} in ${account.name}`;
     document.getElementById('heldAmountLabel').textContent = `Amount of ${account.name} for ${goal.name}`;
+    document.getElementById('removeHeld').textContent = `Remove from ${account.name}`;
+    document.getElementById('removeHeld').closest('.sheet-actions').style.display = heldEdit.held > 0.005 ? 'flex' : 'none';
     heldAmountInput.value = Math.round(heldEdit.held * 100) / 100;
+    heldDateInput.value = toISODate(startOfToday());
     syncHeldHint();
     heldOverlay.classList.add('open');
     setTimeout(() => heldAmountInput.select(), 100);
@@ -2715,33 +2728,54 @@
   document.getElementById('cancelHeld').addEventListener('click', closeHeldSheet);
   heldOverlay.addEventListener('click', (e) => { if (e.target === heldOverlay) closeHeldSheet(); });
 
-  document.getElementById('saveHeld').addEventListener('click', async () => {
-    if (!heldEdit) return;
+  // Records the change to `value` as one entry, dated the chosen day (today keeps the time it was made).
+  async function saveHeld(value) {
     const { goal, account, held, unassigned } = heldEdit;
-    const value = parseFloat(heldAmountInput.value);
-    if (!(value >= 0)) { showToast('Enter an amount, or 0'); return; }
+    const date = heldDateInput.value;
+    if (!date || hasBadDate(heldDateInput)) { showToast('Enter the date'); return; }
+    if (date > toISODate(startOfToday())) { showToast("The date can't be in the future"); return; }
     const diff = Math.round((value - held) * 100) / 100;
     if (Math.abs(diff) < 0.005) { closeHeldSheet(); return; }
     if (diff > Math.max(0, unassigned) + 0.005) {
       showToast(`Only ${formatMoney(Math.max(0, unassigned))} in ${account.name} is unassigned`);
       return;
     }
-    const saveBtn = document.getElementById('saveHeld');
-    saveBtn.disabled = true;
+    const createdAt = date === toISODate(startOfToday()) ? {} : { created_at: new Date(`${date}T12:00:00`).toISOString() };
+    const buttons = ['saveHeld', 'removeHeld'].map(id => document.getElementById(id));
+    buttons.forEach(b => { b.disabled = true; });
     try {
       const [dep] = await insertDepositsRemote([{
-        goal_id: goal.id, amount: diff, account_id: account.id, note: diff > 0 ? 'Assigned' : 'Unassigned'
+        goal_id: goal.id, amount: diff, account_id: account.id, note: diff > 0 ? 'Assigned' : 'Unassigned', ...createdAt
       }]);
       allDeposits.push(dep);
+      allDeposits.sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
       goal.saved += diff;
       render();
       closeHeldSheet();
-      showToast(`${goal.name}: ${formatMoney(value)} in ${account.name}`);
+      showToast(value > 0.005 ? `${goal.name}: ${formatMoney(value)} in ${account.name}` : `${goal.name} removed from ${account.name}`);
     } catch (e) {
       showToast("Couldn't save — check your connection");
     } finally {
-      saveBtn.disabled = false;
+      buttons.forEach(b => { b.disabled = false; });
     }
+  }
+
+  document.getElementById('saveHeld').addEventListener('click', () => {
+    if (!heldEdit) return;
+    const value = parseFloat(heldAmountInput.value);
+    if (!(value >= 0)) { showToast('Enter an amount, or 0'); return; }
+    saveHeld(value);
+  });
+
+  document.getElementById('removeHeld').addEventListener('click', async () => {
+    if (!heldEdit) return;
+    const { goal, account, held } = heldEdit;
+    const usual = goal.accountId === account.id;
+    const ok = await askConfirm(`Remove ${goal.name} from ${account.name}?`,
+      `Its ${formatMoney(held)} goes back to unassigned in ${account.name}, and comes off what ${goal.name} has saved. Nothing moves between accounts.` +
+      (usual ? ` ${account.name} is still its usual account, so it stays listed at £0. Change that by editing the goal.` : ''),
+      'Remove', true);
+    if (ok) saveHeld(0);
   });
 
   // ---------- Move money sheet ----------
