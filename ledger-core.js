@@ -168,8 +168,8 @@
 
   // ---------- Money ----------
   function formatMoney(n) {
-    const sign = n < 0 ? '-' : '';
     const abs = Math.round(Math.abs(Number(n)) * 100) / 100;
+    const sign = n < 0 && abs > 0 ? '-' : ''; // rounded first, so -0.001 is £0 rather than -£0
     const pence = Number.isInteger(abs) ? 0 : 2; // £950, but £174.50 rather than £174.5
     return sign + '£' + abs.toLocaleString('en-GB', { minimumFractionDigits: pence, maximumFractionDigits: 2 });
   }

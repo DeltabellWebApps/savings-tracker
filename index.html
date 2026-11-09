@@ -7,7 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- Pinned to an exact version, with its hash, so a new release can't change the app untested. To upgrade, change
+     the version and replace the integrity value with the new file's sha384 hash. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"
+  integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
 <script src="ledger-core.js"></script>
 <style>
   :root {
@@ -1291,18 +1294,79 @@
   const { hasTarget } = LedgerCore;
   const { isPay, PAY_TAG } = LedgerCore;
 
-  // ---------- Goals CRUD ----------
-  async function loadGoals() {
-    try {
-      const { data, error } = await sb.from('goals').select('*').order('sort_order', { ascending: true, nullsFirst: false });
+  // ---------- Loading ----------
+  // Supabase hands back at most 1,000 rows per request (the project's "Max rows" setting), so lists are fetched a
+  // page at a time until a short page comes back. `query` builds a fresh query each time, ordered down to `id` so
+  // the pages can't overlap or skip rows.
+  const PAGE_SIZE = 1000;
+
+  async function fetchAll(query) {
+    const rows = [];
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data, error } = await query().range(from, from + PAGE_SIZE - 1);
       if (error) throw error;
-      goals = data.map(fromGoalRow);
-    } catch (e) {
-      showToast("Couldn't load — check your connection");
-      goals = [];
+      rows.push(...data);
+      if (data.length < PAGE_SIZE) return rows;
     }
   }
 
+  // The error a table that doesn't exist yet gives (the savings account tables before migration 003).
+  function isMissingTable(e) {
+    return !!e && (e.code === 'PGRST205' || e.code === '42P01');
+  }
+
+  // This pay period's spends, plus the previous few periods' for the budgets by-month chart.
+  const BUDGET_HISTORY_PERIODS = 5;
+
+  let loadedAt = 0;      // when everything was last loaded
+  let loadedDay = '';    // the date it was loaded on, to reload on a new day (perhaps a new pay period)
+
+  // Loads everything. What's shown is only replaced once all of it has arrived, so a failure never leaves a mix
+  // of new and old (or empty) lists. `keep()`, if given, is asked once it has arrived; returning false throws it
+  // away (a sheet was opened meanwhile and is working on what's shown). Returns true if it loaded and was kept.
+  async function loadAll(keep) {
+    const spendsFrom = toISODate(payPeriodFor(startOfToday(), BUDGET_HISTORY_PERIODS).start);
+    // The savings account tables come back as null if they don't exist yet; any other failure counts.
+    const optional = p => p.catch(e => { if (isMissingTable(e)) return null; throw e; });
+    let r;
+    try {
+      const [g, d, b, p, bu, s, ba, a, ae, t] = await Promise.all([
+        fetchAll(() => sb.from('goals').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('id')),
+        fetchAll(() => sb.from('deposits').select('*').order('created_at', { ascending: true }).order('id')),
+        fetchAll(() => sb.from('bills').select('*').order('created_at', { ascending: true }).order('id')),
+        fetchAll(() => sb.from('bill_payments').select('*').order('due_date', { ascending: false }).order('id')),
+        fetchAll(() => sb.from('budgets').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }).order('id')),
+        fetchAll(() => sb.from('spends').select('*').gte('spent_on', spendsFrom).order('spent_on').order('id')),
+        fetchAll(() => sb.from('balances').select('*').order('created_at', { ascending: true }).order('id')),
+        optional(fetchAll(() => sb.from('accounts').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }).order('id'))),
+        optional(fetchAll(() => sb.from('account_balances').select('*').order('created_at', { ascending: true }).order('id'))),
+        optional(fetchAll(() => sb.from('transfers').select('*').order('moved_on', { ascending: true }).order('id')))
+      ]);
+      r = { g, d, b, p, bu, s, ba, a, ae, t };
+    } catch (e) {
+      return false;
+    }
+    if (keep && !keep()) return false;
+    goals = r.g.map(fromGoalRow);
+    allDeposits = r.d.map(fromDepositRow);
+    bills = r.b.map(fromBillRow);
+    payments = r.p.map(fromPaymentRow);
+    budgets = r.bu.map(fromBudgetRow);
+    const periodStart = toISODate(currentPayPeriod().start);
+    const spends = r.s.map(fromSpendRow);
+    periodSpends = spends.filter(x => x.spentOn >= periodStart);
+    pastSpends = spends.filter(x => x.spentOn < periodStart);
+    balances = r.ba.map(fromBalanceRow);
+    accountsReady = r.a !== null && r.ae !== null && r.t !== null;
+    accounts = accountsReady ? r.a.map(fromAccountRow) : [];
+    accountEntries = accountsReady ? r.ae.map(fromAccountEntryRow) : [];
+    transfers = accountsReady ? r.t.map(fromTransferRow) : [];
+    loadedAt = Date.now();
+    loadedDay = toISODate(startOfToday());
+    return true;
+  }
+
+  // ---------- Goals CRUD ----------
   async function createGoalRemote(fields) {
     const nextOrder = goals.length ? Math.max(...goals.map(g => g.sortOrder)) + 1 : 1;
     const row = { ...fields, saved: 0, sort_order: nextOrder };
@@ -1323,19 +1387,9 @@
 
   // ---------- Deposits CRUD ----------
   async function loadDeposits(goalId) {
-    const { data, error } = await sb.from('deposits').select('*').eq('goal_id', goalId).order('created_at', { ascending: false });
-    if (error) throw error;
-    return data.map(fromDepositRow);
-  }
-
-  async function loadAllDeposits() {
-    try {
-      const { data, error } = await sb.from('deposits').select('*').order('created_at', { ascending: true });
-      if (error) throw error;
-      allDeposits = data.map(fromDepositRow);
-    } catch (e) {
-      allDeposits = [];
-    }
+    const rows = await fetchAll(() => sb.from('deposits').select('*').eq('goal_id', goalId)
+      .order('created_at', { ascending: false }).order('id'));
+    return rows.map(fromDepositRow);
   }
 
   async function createDepositRemote(goalId, amount, note) {
@@ -1361,17 +1415,6 @@
   }
 
   // ---------- Bills CRUD ----------
-  async function loadBills() {
-    try {
-      const { data, error } = await sb.from('bills').select('*').order('created_at', { ascending: true });
-      if (error) throw error;
-      bills = data.map(fromBillRow);
-    } catch (e) {
-      showToast("Couldn't load bills — check your connection");
-      bills = [];
-    }
-  }
-
   async function createBillRemote(fields) {
     const { data, error } = await sb.from('bills').insert([fields]).select();
     if (error) throw error;
@@ -1389,17 +1432,6 @@
   }
 
   // ---------- Bill payments CRUD ----------
-  async function loadPayments() {
-    try {
-      const { data, error } = await sb.from('bill_payments').select('*').order('due_date', { ascending: false });
-      if (error) throw error;
-      payments = data.map(fromPaymentRow);
-    } catch (e) {
-      showToast("Couldn't load payments — check your connection");
-      payments = [];
-    }
-  }
-
   async function createPaymentRemote(billId, dueDate, amount) {
     const { data, error } = await sb.from('bill_payments').insert([{ bill_id: billId, due_date: dueDate, amount }]).select();
     if (error) throw error;
@@ -1417,76 +1449,14 @@
   }
 
   // ---------- Budgets CRUD ----------
-  async function loadBudgets() {
-    try {
-      const { data, error } = await sb.from('budgets').select('*')
-        .order('sort_order', { ascending: true }).order('created_at', { ascending: true });
-      if (error) throw error;
-      budgets = data.map(fromBudgetRow);
-    } catch (e) {
-      showToast("Couldn't load budgets — check your connection");
-      budgets = [];
-    }
-  }
-
-  // This pay period's spends, plus the previous few periods' for the budgets by-month chart.
-  const BUDGET_HISTORY_PERIODS = 5;
-
-  async function loadPeriodSpends() {
-    const from = toISODate(payPeriodFor(startOfToday(), BUDGET_HISTORY_PERIODS).start);
-    const periodStart = toISODate(currentPayPeriod().start);
-    try {
-      const { data, error } = await sb.from('spends').select('*').gte('spent_on', from);
-      if (error) throw error;
-      const all = data.map(fromSpendRow);
-      periodSpends = all.filter(s => s.spentOn >= periodStart);
-      pastSpends = all.filter(s => s.spentOn < periodStart);
-    } catch (e) {
-      periodSpends = [];
-      pastSpends = [];
-    }
-  }
-
   async function loadSpends(budgetId) {
-    const { data, error } = await sb.from('spends').select('*').eq('budget_id', budgetId)
-      .order('spent_on', { ascending: false }).order('created_at', { ascending: false });
-    if (error) throw error;
-    return data.map(fromSpendRow);
-  }
-
-  // ---------- Balances CRUD ----------
-  async function loadBalances() {
-    try {
-      const { data, error } = await sb.from('balances').select('*').order('created_at', { ascending: true });
-      if (error) throw error;
-      balances = data.map(fromBalanceRow);
-    } catch (e) {
-      balances = [];
-    }
+    const rows = await fetchAll(() => sb.from('spends').select('*').eq('budget_id', budgetId)
+      .order('spent_on', { ascending: false }).order('created_at', { ascending: false }).order('id'));
+    return rows.map(fromSpendRow);
   }
 
   // ---------- Savings accounts CRUD ----------
-  // These tables arrive with migration 003. Until it's run the queries fail and accounts stay hidden.
-  async function loadAccounts() {
-    try {
-      const [a, e, t] = await Promise.all([
-        sb.from('accounts').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }),
-        sb.from('account_balances').select('*').order('created_at', { ascending: true }),
-        sb.from('transfers').select('*').order('moved_on', { ascending: true })
-      ]);
-      if (a.error || e.error || t.error) throw a.error || e.error || t.error;
-      accounts = a.data.map(fromAccountRow);
-      accountEntries = e.data.map(fromAccountEntryRow);
-      transfers = t.data.map(fromTransferRow);
-      accountsReady = true;
-    } catch (err) {
-      accounts = [];
-      accountEntries = [];
-      transfers = [];
-      accountsReady = false;
-    }
-  }
-
+  // These tables arrive with migration 003. Until it's run they're missing and accounts stay hidden (see loadAll).
   async function createTransferRemote(fields) {
     return fromTransferRow(await saveRow('transfers', null, fields));
   }
@@ -1533,7 +1503,7 @@
   function formatDate(iso) {
     if (!iso) return '';
     const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   }
 
   function showToast(msg) {
@@ -1598,7 +1568,7 @@
       <button class="archive-toggle" aria-expanded="${open}">${open ? '▾' : '▸'} Archived ${noun} (${rows.length})</button>
       ${open ? `<div class="statement archive-list">${rows.map(r => `
         <div class="statement-row">
-          <div>${escapeHtml(r.name)}<span class="meta">${r.meta}</span></div>
+          <div>${escapeHtml(r.name)}<span class="meta">${escapeHtml(r.meta)}</span></div>
           <div class="row-end">
             <div class="amt">${r.amount}</div>
             <button class="btn-small unarchive" data-id="${r.id}">Restore</button>
@@ -1638,10 +1608,10 @@
     return n + s;
   }
 
+  // Safe in text and in quoted attributes (data-cat="…", value="…").
+  const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    return String(str == null ? '' : str).replace(/[&<>"']/g, c => HTML_ESCAPES[c]);
   }
 
   // ---------- Category chips ----------
@@ -3071,6 +3041,7 @@
     const date = moveDateInput.value;
     const note = moveNoteInput.value.trim();
     if (!date || hasBadDate(moveDateInput)) { showToast('Enter the date'); return; }
+    if (date > toISODate(startOfToday())) { showToast("The date can't be in the future"); return; }
     const choices = new Map(moveGoalChoices().map(c => [c.g.id, c]));
     const rows = [];
     for (const r of moveRows) {
@@ -4225,24 +4196,97 @@
     if (endDate && endDate < startDate) { showToast('Last payment must be after the first'); return; }
 
     const fields = { name, amount, frequency, start_date: startDate, end_date: endDate, category: category || null };
+
+    // Payments are matched to a bill by due date. When the dates move, the recorded payments move with them; when
+    // how often it's paid changes they can't, so say what will happen first.
+    const editing = editingBillId ? bills.find(x => x.id === editingBillId) : null;
+    const recorded = editing ? payments.filter(p => p.billId === editing.id) : [];
+    let moves = [];
+    if (editing && recorded.length && (editing.startDate !== startDate || editing.frequency !== frequency)) {
+      if (editing.frequency !== frequency) {
+        const n = recorded.length;
+        const ok = await askConfirm(`Change how often ${editing.name} is paid?`,
+          `Its ${n} recorded payment${n === 1 ? '' : 's'} can't follow a different schedule, so ${n === 1 ? 'it stays' : 'they stay'} on the old dates. ` +
+          'Any dates in the new schedule since you added it will show as unpaid: mark them paid, or archive this bill and add a new one instead.',
+          'Save anyway');
+        if (!ok) return;
+      } else {
+        moves = movedPayments(editing, { ...editing, startDate, endDate }, recorded);
+      }
+    }
+
     const saveBtn = document.getElementById('saveBill');
     saveBtn.disabled = true;
     try {
-      if (editingBillId) {
-        await updateBillRemote(editingBillId, fields);
-        const b = bills.find(x => x.id === editingBillId);
-        Object.assign(b, { name, amount, frequency, startDate, endDate, category });
+      if (editing) {
+        await updateBillRemote(editing.id, fields);
+        Object.assign(editing, { name, amount, frequency, startDate, endDate, category });
       } else {
         bills.push(await createBillRemote({ ...fields, kind: editingBillKind }));
       }
-      render();
-      closeBillSheet();
     } catch (e) {
+      saveBtn.disabled = false;
       showToast("Couldn't save — check your connection");
+      return;
+    }
+    try {
+      // Ten at a time, in the order movedPayments gives, so a long-running weekly bill doesn't take minutes.
+      for (let i = 0; i < moves.length; i += 10) {
+        await Promise.all(moves.slice(i, i + 10).map(async m => {
+          await updatePaymentRemote(m.payment.id, { due_date: m.dueDate });
+          m.payment.dueDate = m.dueDate;
+        }));
+      }
+      if (moves.length) showToast(`Saved · ${moves.length} payment${moves.length === 1 ? '' : 's'} moved to the new dates`);
+    } catch (e) {
+      showToast("Saved, but not all of its payments moved — check its Payments");
     } finally {
       saveBtn.disabled = false;
     }
+    render();
+    closeBillSheet();
   });
+
+  // Where a bill's recorded payments go when its due date moves (same frequency). Each payment keeps its place in
+  // the schedule: February's payment goes to February's new date. If the first date moved by a cycle or more,
+  // places shift by that many, so a payment still lands on the new date nearest its old one. Payments on a date
+  // that isn't in the old schedule, or whose place comes before the new first date or after the new last one,
+  // stay where they are. Returns [{ payment, dueDate }] for the ones that change.
+  const CYCLE_DAYS = { weekly: 7, fortnightly: 14, monthly: 30.44, quarterly: 91.31, yearly: 365.25 };
+
+  // A date's place in a bill's schedule (0 = the first date), or null if it isn't one of its dates.
+  function occurrenceIndex(bill, iso) {
+    if (bill.frequency === 'once') return iso === bill.startDate ? 0 : null;
+    const start = parseLocalDate(bill.startDate), d = parseLocalDate(iso);
+    const n = bill.frequency === 'weekly' || bill.frequency === 'fortnightly'
+      ? Math.round((d - start) / 86400000 / CYCLE_DAYS[bill.frequency])
+      : Math.round(((d.getFullYear() - start.getFullYear()) * 12 + d.getMonth() - start.getMonth()) /
+          { monthly: 1, quarterly: 3, yearly: 12 }[bill.frequency]);
+    return n >= 0 && toISODate(LedgerCore.occurrence(start, bill.frequency, n)) === iso ? n : null;
+  }
+
+  function movedPayments(oldBill, newBill, recorded) {
+    const newStart = parseLocalDate(newBill.startDate);
+    const newEnd = newBill.endDate ? parseLocalDate(newBill.endDate) : null;
+    const shift = newBill.frequency === 'once' ? 0
+      : Math.round((newStart - parseLocalDate(oldBill.startDate)) / 86400000 / CYCLE_DAYS[newBill.frequency]);
+    const moves = [];
+    recorded.forEach(p => {
+      const n = occurrenceIndex(oldBill, p.dueDate);
+      if (n === null || n - shift < 0) return;
+      const d = newBill.frequency === 'once' ? newStart : LedgerCore.occurrence(newStart, newBill.frequency, n - shift);
+      if (newEnd && d > newEnd) return;
+      const iso = toISODate(d);
+      if (iso !== p.dueDate) moves.push({ payment: p, dueDate: iso });
+    });
+    // Don't move one onto a date another payment of this bill keeps.
+    const staying = new Set(recorded.filter(p => !moves.some(m => m.payment === p)).map(p => p.dueDate));
+    // Saved one at a time and each bill has one payment per date, so when dates move later the latest goes first
+    // (and the other way round), clearing each date before anything lands on it.
+    const later = newStart > parseLocalDate(oldBill.startDate);
+    return moves.filter(m => !staying.has(m.dueDate))
+      .sort((x, y) => (x.payment.dueDate < y.payment.dueDate ? 1 : -1) * (later ? 1 : -1));
+  }
 
   document.getElementById('archiveBill').addEventListener('click', async () => {
     if (editingBillId && await setArchived('bills', editingBillId, true)) closeBillSheet();
@@ -4925,9 +4969,58 @@
     document.getElementById('billList').innerHTML = '<div class="empty">Loading your bills…</div>';
     document.getElementById('budgetList').innerHTML = '<div class="empty">Loading your budgets…</div>';
     document.getElementById('overviewContent').innerHTML = '<div class="empty">Loading…</div>';
-    await Promise.all([loadGoals(), loadBills(), loadPayments(), loadAllDeposits(), loadBudgets(), loadPeriodSpends(), loadBalances(), loadAccounts()]);
-    render();
+    if (await loadAll()) render();
+    else showLoadError();
   }
+
+  // Nothing loaded: say so on every tab, with a retry, rather than show totals worked out from missing data.
+  function showLoadError() {
+    const html = `<div class="empty"><div class="big">Couldn't load your data</div>Check your connection, then try again.
+      <div style="margin-top: 14px;"><button class="btn-small load-retry">Try again</button></div></div>`;
+    ['overviewContent', 'goalList', 'billList', 'budgetList'].forEach(id => { document.getElementById(id).innerHTML = html; });
+    ['accountList', 'billTrends', 'budgetTrends'].forEach(id => { document.getElementById(id).innerHTML = ''; });
+    ['totals', 'billTotals', 'budgetTotals', 'categoryChips', 'billChips'].forEach(id => { document.getElementById(id).style.display = 'none'; });
+    document.querySelectorAll('.load-retry').forEach(btn => btn.addEventListener('click', async () => {
+      document.querySelectorAll('.load-retry').forEach(b => { b.disabled = true; b.textContent = 'Loading…'; });
+      if (await loadAll()) render();
+      else showLoadError();
+    }));
+  }
+
+  // ---------- Refreshing ----------
+  // Everything is loaded at sign-in. Coming back to the app after a few minutes, or on a new day (which may be a
+  // new pay period), loads it again, so changes from the widget or another device show up and this pay period's
+  // spends are the right ones. Not while a sheet is open, so nothing changes under it; it's tried again when the
+  // sheet closes. A failed refresh keeps what's already shown.
+  const REFRESH_AFTER_MS = 5 * 60 * 1000;
+  let refreshing = false;
+
+  function isStale() {
+    return loadedAt > 0 && (Date.now() - loadedAt > REFRESH_AFTER_MS || toISODate(startOfToday()) !== loadedDay);
+  }
+
+  const sheetOpen = () => !!document.querySelector('.overlay.open');
+
+  async function refreshIfStale() {
+    if (refreshing || !signedInUserId || document.visibilityState !== 'visible' || !isStale() || sheetOpen()) return;
+    refreshing = true;
+    let sheetOpened = false;
+    // A sheet opened while it was loading is working on what's shown, so the new copy is thrown away and
+    // tried again when the sheet closes.
+    const ok = await loadAll(() => !(sheetOpened = sheetOpen()));
+    refreshing = false;
+    if (ok) render();
+    else if (!sheetOpened) showToast("Couldn't refresh — showing what was loaded earlier");
+  }
+
+  document.addEventListener('visibilitychange', refreshIfStale);
+  window.addEventListener('pageshow', refreshIfStale);
+  window.addEventListener('focus', refreshIfStale);
+  // A sheet closing.
+  const sheetWatcher = new MutationObserver(() => { if (!sheetOpen()) refreshIfStale(); });
+  document.querySelectorAll('.overlay').forEach(o => sheetWatcher.observe(o, { attributes: true, attributeFilter: ['class'] }));
+  // A new day arriving while the app sits open.
+  setInterval(() => { if (loadedDay && toISODate(startOfToday()) !== loadedDay) refreshIfStale(); }, 60 * 1000);
 
   function showAuthScreen() {
     appScreen.style.display = 'none';
@@ -4948,6 +5041,8 @@
     accountEntries = [];
     transfers = [];
     accountsReady = false;
+    loadedAt = 0;
+    loadedDay = '';
   }
 
   // Supabase reports INITIAL_SESSION on load and SIGNED_IN / SIGNED_OUT after, but also TOKEN_REFRESHED

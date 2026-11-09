@@ -95,19 +95,34 @@ async function call(method, path, body) {
     if (status < 200 || status >= 300) {
       const err = new Error((res && res.message) || `Supabase returned ${status}`);
       err.status = status;
+      err.code = res && res.code;
       throw err;
     }
     return res;
   }
 }
 
+// Supabase hands back at most 1,000 rows per request, so a list is fetched a page at a time until a short page
+// comes back. `path` must be ordered down to `id` so the pages can't overlap or skip rows.
+const PAGE_SIZE = 1000;
+
+async function getAll(path) {
+  const rows = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const page = await call('GET', `${path}&limit=${PAGE_SIZE}&offset=${offset}`);
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return rows;
+  }
+}
+
 // Savings accounts need migration 003; until it's run those tables don't exist, so treat them as empty.
+// Any other failure (no signal, say) is a real one, so it's passed on rather than read as "no accounts".
 async function optional(path) {
   try {
-    return await call('GET', path);
+    return await getAll(path);
   } catch (e) {
-    if (e instanceof AuthError) throw e;
-    return [];
+    if (e.code === 'PGRST205' || e.code === '42P01') return [];
+    throw e;
   }
 }
 
@@ -116,17 +131,17 @@ async function fetchRows() {
   const period = core.currentPayPeriod();
   const sinceDay = core.toISODate(period.start);
   const [goals, deposits, bills, payments, budgets, spends, balances, accounts, accountEntries, transfers] = await Promise.all([
-    call('GET', 'goals?select=*&order=sort_order.asc'),
+    getAll('goals?select=*&order=sort_order.asc.nullslast,id.asc'),
     // All goal entries, not just this period's: what each goal holds in each account adds them all up.
-    call('GET', 'deposits?select=*&order=created_at.asc'),
-    call('GET', 'bills?select=*'),
-    call('GET', 'bill_payments?select=*'),
-    call('GET', 'budgets?select=*&order=sort_order.asc'),
-    call('GET', `spends?select=*&spent_on=gte.${sinceDay}`),
-    call('GET', 'balances?select=*&order=created_at.asc'),
-    optional('accounts?select=*&order=sort_order.asc'),
-    optional('account_balances?select=*&order=created_at.asc'),
-    optional('transfers?select=*&order=moved_on.asc'),
+    getAll('deposits?select=*&order=created_at.asc,id.asc'),
+    getAll('bills?select=*&order=created_at.asc,id.asc'),
+    getAll('bill_payments?select=*&order=due_date.desc,id.asc'),
+    getAll('budgets?select=*&order=sort_order.asc,created_at.asc,id.asc'),
+    getAll(`spends?select=*&spent_on=gte.${sinceDay}&order=spent_on.asc,id.asc`),
+    getAll('balances?select=*&order=created_at.asc,id.asc'),
+    optional('accounts?select=*&order=sort_order.asc,created_at.asc,id.asc'),
+    optional('account_balances?select=*&order=created_at.asc,id.asc'),
+    optional('transfers?select=*&order=moved_on.asc,id.asc'),
   ]);
   return { goals, deposits, bills, payments, budgets, spends, balances, accounts, accountEntries, transfers };
 }
