@@ -1404,11 +1404,6 @@
     return data.map(fromDepositRow);
   }
 
-  async function updateDepositRemote(id, fields) {
-    const { error } = await sb.from('deposits').update(fields).eq('id', id);
-    if (error) throw error;
-  }
-
   async function deleteDepositRemote(id) {
     const { error } = await sb.from('deposits').delete().eq('id', id);
     if (error) throw error;
@@ -1457,8 +1452,12 @@
 
   // ---------- Savings accounts CRUD ----------
   // These tables arrive with migration 003. Until it's run they're missing and accounts stay hidden (see loadAll).
-  async function createTransferRemote(fields) {
-    return fromTransferRow(await saveRow('transfers', null, fields));
+  // Calls one of the database functions from migration 007. Each does a save that touches several rows in one
+  // go, so it saves all of it or none of it.
+  async function rpc(name, args) {
+    const { data, error } = await sb.rpc(name, args);
+    if (error) throw error;
+    return data;
   }
 
   async function saveRow(table, id, fields) {
@@ -2197,11 +2196,15 @@
     const saveBtn = document.getElementById('saveTransfer');
     saveBtn.disabled = true;
     try {
-      await saveRow('transfers', t.id, fields);
+      // The transfer and the goal entry that follows it, in one call (migration 007).
+      const followChanges = follow && Math.abs(Math.abs(follow.amount) - raw) >= 0.005;
+      const newAmount = followChanges ? Math.sign(follow.amount) * raw : null;
+      await rpc('update_transfer', {
+        p_id: t.id, p_account_id: fields.account_id, p_amount: fields.amount, p_moved_on: fields.moved_on, p_note: fields.note,
+        p_entry_id: followChanges ? follow.id : null, p_entry_amount: newAmount
+      });
       Object.assign(t, { accountId: a.id, amount, movedOn: fields.moved_on, note: fields.note || '' });
-      if (follow && Math.abs(Math.abs(follow.amount) - raw) >= 0.005) {
-        const newAmount = Math.sign(follow.amount) * raw;
-        await updateDepositRemote(follow.id, { amount: newAmount });
+      if (followChanges) {
         if (!follow.paidOut) goals.find(g => g.id === follow.goalId).saved += newAmount - follow.amount;
         follow.amount = newAmount;
       }
@@ -2226,19 +2229,19 @@
       (names.length ? `, and its entries for ${names.join(', ')} will be deleted too.` : '.');
     if (!(await askConfirm('Delete this transfer?', message, 'Delete', true))) return;
     try {
-      for (const d of linked) {
-        await deleteDepositRemote(d.id);
-        if (!d.paidOut) goals.find(g => g.id === d.goalId).saved -= d.amount;
-      }
-      allDeposits = allDeposits.filter(d => !linked.includes(d));
-      await deleteRow('transfers', t.id);
+      // The transfer and its goal entries, in one call (migration 007). It says which entries went.
+      const gone = new Set(await rpc('delete_transfer', { p_id: t.id }));
+      allDeposits.filter(d => gone.has(d.id)).forEach(d => {
+        const g = goals.find(x => x.id === d.goalId);
+        if (g && !d.paidOut) g.saved -= d.amount;
+      });
+      allDeposits = allDeposits.filter(d => !gone.has(d.id));
       transfers = transfers.filter(x => x !== t);
       render();
       closeTransferSheet();
       if (accountHistoryOverlay.classList.contains('open')) openAccountHistory(historyAccountId);
       showToast('Transfer deleted');
     } catch (e) {
-      render();
       showToast("Couldn't delete — check your connection");
     }
   });
@@ -2668,18 +2671,18 @@
     const saveBtn = document.getElementById('saveDeposit');
     saveBtn.disabled = true;
     try {
-      await updateDepositRemote(dep.id, { amount, note: note || null, ...(redated ? { created_at: createdAt } : {}) });
+      // The entry, and the transfer when it's all of the transfer's money, in one call (migration 007).
+      const follows = t && whole;
+      const moved = follows && Math.abs(Math.abs(t.amount) - Math.abs(amount)) >= 0.005 ? Math.sign(t.amount) * Math.abs(amount) : null;
+      const movedOn = follows && redated ? date : null;
+      await rpc('update_entry', {
+        p_id: dep.id, p_amount: amount, p_note: note || null, p_created_at: redated ? createdAt : null,
+        p_transfer_id: follows && (moved !== null || movedOn) ? t.id : null, p_transfer_amount: moved, p_moved_on: movedOn
+      });
       // The database adjusts the goal's saved total itself (pay outs aside); mirror it locally.
       if (!dep.paidOut) g.saved += amount - dep.amount;
-      if (t && whole && Math.abs(Math.abs(t.amount) - Math.abs(amount)) >= 0.005) {
-        const moved = Math.sign(t.amount) * Math.abs(amount);
-        await saveRow('transfers', t.id, { amount: moved });
-        t.amount = moved;
-      }
-      if (t && whole && redated) {
-        await saveRow('transfers', t.id, { moved_on: date });
-        t.movedOn = date;
-      }
+      if (moved !== null) t.amount = moved;
+      if (movedOn) t.movedOn = movedOn;
       Object.assign(dep, { amount, note, createdAt });
       allDeposits.sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
       render();
@@ -2703,11 +2706,9 @@
         : t ? `. The transfer stays, so the money is left unassigned in ${a ? a.name : 'the account'}.` : '.');
     if (!(await askConfirm('Delete this entry?', message, 'Delete', true))) return;
     try {
-      if (t && whole) {
-        await deleteRow('transfers', t.id);
-        transfers = transfers.filter(x => x !== t);
-      }
-      await deleteDepositRemote(dep.id);
+      // The entry, and its transfer when it was all of the transfer's money, in one call (migration 007).
+      await rpc('delete_entry', { p_id: dep.id, p_transfer_id: t && whole ? t.id : null });
+      if (t && whole) transfers = transfers.filter(x => x !== t);
       if (!dep.paidOut) g.saved -= dep.amount;
       allDeposits = allDeposits.filter(d => d.id !== dep.id);
       render();
@@ -3064,39 +3065,44 @@
 
     const saveBtn = document.getElementById('saveMove');
     saveBtn.disabled = true;
-    const made = [];
     try {
-      // Transfers: money leaving a savings account, then money arriving in one.
+      // Transfers: money leaving a savings account, then money arriving in one. Each is keyed by its account, so
+      // the goal entries below can say which one they belong to.
+      const moves = [];
       if (isAccountEnd(from) && from !== to) {
-        made.push(await createTransferRemote({ account_id: from, amount: -amount, moved_on: date, note: note || null,
-          ...(to !== 'current' ? { external: true } : {}) }));
+        moves.push({ key: from, account_id: from, amount: -amount, moved_on: date, note: note || null,
+          external: to !== 'current', due_date: null });
       }
       if (isAccountEnd(to) && from !== to) {
-        made.push(await createTransferRemote({ account_id: to, amount, moved_on: date, note: note || (moveStandingDue ? 'Standing order' : null),
-          ...(from !== 'current' ? { external: true } : {}), ...(moveStandingDue ? { due_date: moveStandingDue } : {}) }));
+        moves.push({ key: to, account_id: to, amount, moved_on: date, note: note || (moveStandingDue ? 'Standing order' : null),
+          external: from !== 'current', due_date: moveStandingDue || null });
       }
-      transfers.push(...made);
-      const transferAt = key => { const t = made.find(x => x.accountId === key); return t ? t.id : null; };
+      const transferAt = key => (moves.some(m => m.key === key) ? key : null);
 
       // Goal entries. Backdated ones are dated that day, so they count in the right pay period.
-      const createdAt = date === toISODate(startOfToday()) ? {} : { created_at: new Date(`${date}T12:00:00`).toISOString() };
+      const createdAt = date === toISODate(startOfToday()) ? null : new Date(`${date}T12:00:00`).toISOString();
       const entries = [];
       rows.forEach(({ goal, amt }) => {
-        const base = { goal_id: goal.id, note: note || null, ...createdAt };
+        const base = { goal_id: goal.id, note: note || null, created_at: createdAt, external: false, paid_out: false };
         if (goal.straightOut) {
-          entries.push({ ...base, amount: amt, account_id: heldKey(from), external: from === 'outside', transfer_id: transferAt(from) });
+          entries.push({ ...base, amount: amt, account_id: heldKey(from), external: from === 'outside', transfer_key: transferAt(from) });
           return;
         }
         if (to === 'out' || (isAccountEnd(from) && from !== to)) {
-          entries.push({ ...base, amount: -amt, account_id: heldKey(from), paid_out: to === 'out', transfer_id: transferAt(from) });
+          entries.push({ ...base, amount: -amt, account_id: heldKey(from), paid_out: to === 'out', transfer_key: transferAt(from) });
         }
         if (to !== 'out') {
           entries.push({ ...base, amount: amt, account_id: heldKey(to), external: from === 'outside',
-            transfer_id: transferAt(to) || transferAt(from) });
+            transfer_key: transferAt(to) || transferAt(from) });
         }
       });
-      const saved = await insertDepositsRemote(entries);
+
+      // All of it in one call, so it saves together or not at all (migration 007).
+      const made = await rpc('move_money', { p_transfers: moves, p_entries: entries });
+      transfers.push(...made.transfers.map(fromTransferRow));
+      const saved = made.deposits.map(fromDepositRow);
       allDeposits.push(...saved);
+      allDeposits.sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
       saved.forEach(d => { if (!d.paidOut) goals.find(g => g.id === d.goalId).saved += d.amount; });
 
       render();
@@ -3109,8 +3115,7 @@
           : `Moved ${formatMoney(amount)} to ${to === 'current' ? 'current account' : accountName(to)}${names ? ` · ${names}` : ''}`);
       if (isAccountEnd(to) && from !== to) warnOverLimit(accounts.find(a => a.id === to));
     } catch (e) {
-      render();
-      showToast(made.length ? "The transfer saved but the goals didn't — add them with Assign" : "Couldn't save — check your connection");
+      showToast("Couldn't save — check your connection");
     } finally {
       saveBtn.disabled = false;
     }
@@ -4218,33 +4223,24 @@
     const saveBtn = document.getElementById('saveBill');
     saveBtn.disabled = true;
     try {
-      if (editing) {
+      if (editing && moves.length) {
+        // The bill and its payments' new dates in one call, so they can't end up out of step (migration 007).
+        await rpc('update_bill', { p_id: editing.id, p_fields: fields, p_moves: moves.map(m => ({ id: m.payment.id, due_date: m.dueDate })) });
+        moves.forEach(m => { m.payment.dueDate = m.dueDate; });
+      } else if (editing) {
         await updateBillRemote(editing.id, fields);
-        Object.assign(editing, { name, amount, frequency, startDate, endDate, category });
       } else {
         bills.push(await createBillRemote({ ...fields, kind: editingBillKind }));
       }
-    } catch (e) {
-      saveBtn.disabled = false;
-      showToast("Couldn't save — check your connection");
-      return;
-    }
-    try {
-      // Ten at a time, in the order movedPayments gives, so a long-running weekly bill doesn't take minutes.
-      for (let i = 0; i < moves.length; i += 10) {
-        await Promise.all(moves.slice(i, i + 10).map(async m => {
-          await updatePaymentRemote(m.payment.id, { due_date: m.dueDate });
-          m.payment.dueDate = m.dueDate;
-        }));
-      }
+      if (editing) Object.assign(editing, { name, amount, frequency, startDate, endDate, category });
+      render();
+      closeBillSheet();
       if (moves.length) showToast(`Saved · ${moves.length} payment${moves.length === 1 ? '' : 's'} moved to the new dates`);
     } catch (e) {
-      showToast("Saved, but not all of its payments moved — check its Payments");
+      showToast("Couldn't save — check your connection");
     } finally {
       saveBtn.disabled = false;
     }
-    render();
-    closeBillSheet();
   });
 
   // Where a bill's recorded payments go when its due date moves (same frequency). Each payment keeps its place in
@@ -4280,12 +4276,9 @@
       if (iso !== p.dueDate) moves.push({ payment: p, dueDate: iso });
     });
     // Don't move one onto a date another payment of this bill keeps.
+    // (Moving ones can swap dates with each other: update_bill takes them all out before putting them back.)
     const staying = new Set(recorded.filter(p => !moves.some(m => m.payment === p)).map(p => p.dueDate));
-    // Saved one at a time and each bill has one payment per date, so when dates move later the latest goes first
-    // (and the other way round), clearing each date before anything lands on it.
-    const later = newStart > parseLocalDate(oldBill.startDate);
-    return moves.filter(m => !staying.has(m.dueDate))
-      .sort((x, y) => (x.payment.dueDate < y.payment.dueDate ? 1 : -1) * (later ? 1 : -1));
+    return moves.filter(m => !staying.has(m.dueDate));
   }
 
   document.getElementById('archiveBill').addEventListener('click', async () => {

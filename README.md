@@ -130,6 +130,22 @@ Deploy the matching app code only *after* running the migration.
 - `006_goal_entries_accounts_payouts.sql` adds `deposits.account_id`, `paid_out` and `transfer_id` (filled in
   from existing data), `goals.straight_out` and `monthly_day`, lets `goals.target` be empty, and changes the
   trigger so pay outs don't lower `saved`. The app needs it from the "Move money" release on.
+- `007_all_or_nothing_saves.sql` adds six database functions. Each does a save that touches several rows in one
+  call, so it saves all of it or none of it:
+  - `move_money`
+  - `delete_transfer`
+  - `update_transfer`
+  - `update_entry`
+  - `delete_entry`
+  - `update_bill` (also moves a bill's payments when its due date changes)
+
+  They run as the signed-in user, so row-level security still applies. Only signed-in users can call them. The
+  app needs this from the 9 Nov 2026 release on.
+
+The SQL files for 001–006 were lost. Only 001 survives, in the GitHub history (deleted on 4 Oct 2026). For a
+record of the schema they built, see the export from 9 Nov 2026 in `supabase/`:
+- `schema-2026-11-09-tables.csv`: tables, columns and row-level security
+- `schema-2026-11-09-rules.csv`: constraints, policies, the trigger and its function
 
 The `supabase/` folder isn't kept on GitHub, so these files are only in the local copy.
 
