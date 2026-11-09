@@ -296,7 +296,8 @@ function sortedGoals(L) {
   return [...live.filter(g => !isDone(g)), ...live.filter(isDone)];
 }
 
-function accountNote(a, info) {
+// The ISA allowance is per person, so an ISA shows the total used across all of them (LedgerCore's isaAllowance).
+function accountNote(a, info, L) {
   const today = startOfToday();
   if (a.maturesOn) {
     const days = Math.round((core.parseLocalDate(a.maturesOn) - today) / 86400000);
@@ -304,7 +305,7 @@ function accountNote(a, info) {
     if (days <= 30) return { text: `Matures in ${days} day${days === 1 ? '' : 's'}`, color: C.danger };
   }
   if (info.unassigned > 0.005) return { text: `${money(info.unassigned)} unassigned`, color: C.soft };
-  if (a.kind === 'isa') return { text: `${money(info.isaUsed)} of ${pounds(ISA_ALLOWANCE)} ISA allowance`, color: C.soft };
+  if (a.kind === 'isa') return { text: `${money(L.isaAllowance().used)} of ${pounds(ISA_ALLOWANCE)} ISA allowance`, color: C.soft };
   return null;
 }
 
@@ -362,7 +363,7 @@ function savingsLayout(w, family, ctx) {
     const accountMax = large ? 3 : (goals.length ? 2 : 3);
     accounts.slice(0, accountMax).forEach((x, i) => {
       if (i > 0) w.addSpacer(6);
-      const note = accountNote(x.a, x.info);
+      const note = accountNote(x.a, x.info, L);
       addRow(w, x.a.name, money(x.info.balance), note && note.text, { compact: !large, subColor: note && note.color });
     });
     const goalMax = large ? 4 : Math.max(0, 3 - Math.min(accounts.length, accountMax));

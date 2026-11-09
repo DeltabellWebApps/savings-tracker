@@ -325,15 +325,40 @@
     return toISODate(logged) === t.movedOn ? logged : parseLocalDate(t.movedOn);
   }
 
+  // Money moved from one ISA to another (Move money between two ISAs) is an ISA transfer. It doesn't use any of the
+  // allowance in the ISA it goes into, and a flexible ISA it leaves doesn't get that room back.
+  // A move like that is two transfers, both `external`: money out of one ISA and the same amount into another, dated
+  // the same day and logged together. The move_money function (migration 007) gives both the same created_at;
+  // moves logged before it were a moment apart, so up to two minutes counts.
+  // Returns the ids of the transfers on both sides of each ISA-to-ISA move.
+  const PAIR_WINDOW_MS = 2 * 60 * 1000;
+
+  function isaTransferIds(accounts, transfers) {
+    const isIsa = new Set(accounts.filter(a => a.kind === 'isa').map(a => a.id));
+    const outs = transfers.filter(t => t.external && t.amount < 0 && isIsa.has(t.accountId));
+    const ids = new Set();
+    transfers.filter(t => t.external && t.amount > 0 && isIsa.has(t.accountId)).forEach(i => {
+      const gap = o => Math.abs(new Date(o.createdAt) - new Date(i.createdAt));
+      const match = outs
+        .filter(o => !ids.has(o.id) && o.accountId !== i.accountId && o.movedOn === i.movedOn &&
+          Math.abs(o.amount + i.amount) < 0.005 && gap(o) <= PAIR_WINDOW_MS)
+        .sort((x, y) => gap(x) - gap(y))[0];
+      if (match) { ids.add(i.id); ids.add(match.id); }
+    });
+    return ids;
+  }
+
   // Everything about one account, from its balance entries and transfers (either list may hold other accounts').
   //   balance    — the latest entry plus transfers since; just the transfers if there's no entry
   //   interest   — [{ date, amount }] per entry after the first
-  //   interestThisYear, paidInThisYear, takenOutThisYear — this tax year
-  //   isaUsed    — ISA allowance used this tax year, including any paid in before the account was added here
-  //                (a flexible ISA gets withdrawals back); isaResetsOn — the next 6 April
+  //   interestThisYear, paidInThisYear, takenOutThisYear — this tax year, every transfer
+  //   isaUsed    — ISA allowance this account has used this tax year, including any paid in before the account
+  //                was added here (a flexible ISA gets withdrawals back). Transfers in `isaMoves` (see
+  //                isaTransferIds) are left out: isaMovedIn / isaMovedOut are those this tax year, and
+  //                isaTakenOut is what was taken out otherwise. isaResetsOn — the next 6 April
   //   paidInThisMonth — this calendar month, for a regular saver's monthly limit
   //   balanceAt(date) — the balance at any time, worked back from the first entry before it
-  function accountState(account, entries, transfers, today) {
+  function accountState(account, entries, transfers, today, isaMoves) {
     const mine = entries.filter(e => e.accountId === account.id)
       .map(e => ({ ...e, time: new Date(e.createdAt) })).sort((a, b) => a.time - b.time);
     const moves = transfers.filter(t => t.accountId === account.id)
@@ -363,7 +388,12 @@
     // What was paid into an ISA this tax year before it was added here, as entered on the account. It only
     // counts in the tax year it was entered for, so it drops off on 6 April like everything else.
     const paidBefore = account.isaPaidBefore && account.isaPaidBeforeYear === toISODate(yearStart) ? account.isaPaidBefore : 0;
-    const isaPaidIn = paidInThisYear + paidBefore;
+    const sum = list => list.reduce((s, t) => s + t.amount, 0);
+    const isaMove = t => !!isaMoves && isaMoves.has(t.id);
+    const isaMovedIn = sum(thisYear.filter(t => t.amount > 0 && isaMove(t)));
+    const isaMovedOut = -sum(thisYear.filter(t => t.amount < 0 && isaMove(t)));
+    const isaPaidIn = paidInThisYear - isaMovedIn + paidBefore;
+    const isaTakenOut = takenOutThisYear - isaMovedOut;
 
     return {
       balance: latest ? latest.amount + movedBetween(latest.time, null) : movedBetween(null, null),
@@ -372,7 +402,10 @@
       interestThisYear: interest.filter(i => i.date >= yearStart).reduce((s, i) => s + i.amount, 0),
       paidInThisYear,
       takenOutThisYear,
-      isaUsed: account.flexible ? Math.max(0, isaPaidIn - takenOutThisYear) : isaPaidIn,
+      isaUsed: account.flexible ? Math.max(0, isaPaidIn - isaTakenOut) : isaPaidIn,
+      isaMovedIn,
+      isaMovedOut,
+      isaTakenOut,
       isaResetsOn: new Date(yearStart.getFullYear() + 1, 3, 6),
       paidInThisMonth: moves.filter(t => t.amount > 0 && parseLocalDate(t.movedOn) >= monthStart)
         .reduce((s, t) => s + t.amount, 0),
@@ -499,8 +532,25 @@
 
     // An account's balance, interest and allowances (see accountState), plus the goals with money kept in it (or
     // that keep their money there by default), what each holds here, and what's in it that no goal has claimed.
+    // Transfers on either side of an ISA-to-ISA move (see isaTransferIds).
+    L.isaMoves = () => isaTransferIds(data.accounts, data.transfers);
+
+    // The ISA allowance is per person, so this adds up every ISA's use this tax year (archived ones too: money paid
+    // in before archiving still counts). `byAccount` maps account id to its own share.
+    L.isaAllowance = () => {
+      const today = startOfToday();
+      const moves = L.isaMoves();
+      const byAccount = new Map();
+      data.accounts.filter(a => a.kind === 'isa').forEach(a => {
+        byAccount.set(a.id, accountState(a, data.accountEntries, data.transfers, today, moves).isaUsed);
+      });
+      const used = [...byAccount.values()].reduce((s, v) => s + v, 0);
+      return { used, left: ISA_ALLOWANCE - used, byAccount, resetsOn: new Date(taxYearStart(today).getFullYear() + 1, 3, 6) };
+    };
+
     L.accountInfo = account => {
-      const state = accountState(account, data.accountEntries, data.transfers, startOfToday());
+      const state = accountState(account, data.accountEntries, data.transfers, startOfToday(),
+        account.kind === 'isa' ? L.isaMoves() : null);
       const heldBy = new Map();
       const goalsIn = L.liveGoals().filter(g => {
         if (g.straightOut) return false;
@@ -710,7 +760,7 @@
 
   return {
     fromRow, PAY_TAG, isPay, ledger,
-    ISA_ALLOWANCE, PERSONAL_SAVINGS_ALLOWANCE, taxYearStart, standingOrder, transferTime, accountState,
+    ISA_ALLOWANCE, PERSONAL_SAVINGS_ALLOWANCE, taxYearStart, standingOrder, transferTime, accountState, isaTransferIds,
     FREQUENCY_LABELS, PER_MONTH, AVG_MONTH_MS,
     parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth, monthShort,
     occurrence, occurrencesFrom, occurrencesBetween, nextDue, trackFrom, monthlyAverage,

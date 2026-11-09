@@ -705,7 +705,10 @@
 <div class="wrap" id="appScreen" style="display:none;">
   <header class="top">
     <h1>Ledger</h1>
-    <button class="btn-icon" id="signOutBtn">sign out</button>
+    <div>
+      <button class="btn-icon" id="refreshBtn">refresh</button>
+      <button class="btn-icon" id="signOutBtn">sign out</button>
+    </div>
   </header>
 
   <section class="view" id="overviewView">
@@ -1814,6 +1817,9 @@
     }
 
     let outsideIsaInterest = 0, anyInterest = false;
+    // The ISA allowance is per person: one total across every ISA (see LedgerCore's isaAllowance).
+    const isa = L.isaAllowance();
+    const isasInUse = accounts.filter(a => a.kind === 'isa' && (!a.archived || (isa.byAccount.get(a.id) || 0) > 0.005)).length;
     html += '<div class="goal-list">' + live.map(a => {
       const info = accountInfo(a);
       if (info.interest.length) anyInterest = true;
@@ -1852,8 +1858,16 @@
         }
       }
       if (a.kind === 'isa') {
-        const pct = Math.min(100, (info.isaUsed / ISA_ALLOWANCE) * 100);
-        notes.push(`<div class="account-note ${info.isaUsed > ISA_ALLOWANCE ? 'warn' : ''}">ISA allowance: ${formatMoney(info.isaUsed)} of ${formatMoney(ISA_ALLOWANCE)} used this tax year${a.flexible && info.takenOutThisYear > 0 ? ` (flexible: ${formatMoney(info.takenOutThisYear)} taken out can go back in)` : ''} · resets ${shortDate(info.isaResetsOn)}
+        // With more than one ISA, the bar is the total across them and this one's share is said alongside.
+        const pct = Math.min(100, (isa.used / ISA_ALLOWANCE) * 100);
+        const used = isasInUse > 1
+          ? `${formatMoney(isa.used)} of ${formatMoney(ISA_ALLOWANCE)} used this tax year across your ISAs, ${formatMoney(info.isaUsed)} of it here`
+          : `${formatMoney(isa.used)} of ${formatMoney(ISA_ALLOWANCE)} used this tax year`;
+        const extras = [
+          info.isaMovedIn > 0.005 ? `${formatMoney(info.isaMovedIn)} moved in from another ISA doesn't count` : '',
+          a.flexible && info.isaTakenOut > 0.005 ? `flexible: ${formatMoney(info.isaTakenOut)} taken out can go back in` : ''
+        ].filter(Boolean);
+        notes.push(`<div class="account-note ${isa.used > ISA_ALLOWANCE + 0.005 ? 'warn' : ''}">ISA allowance: ${used}${extras.length ? ` (${extras.join('; ')})` : ''} · resets ${shortDate(isa.resetsOn)}
           <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div>`);
       }
       if (a.monthlyLimit) {
@@ -4995,16 +5009,35 @@
   const sheetOpen = () => !!document.querySelector('.overlay.open');
 
   async function refreshIfStale() {
-    if (refreshing || !signedInUserId || document.visibilityState !== 'visible' || !isStale() || sheetOpen()) return;
+    if (document.visibilityState !== 'visible' || !isStale()) return;
+    await refresh(false);
+  }
+
+  // Loads everything again and redraws. `manual` (the refresh button) says how it went either way; an automatic
+  // refresh only speaks up when it fails. Returns true if it loaded.
+  async function refresh(manual) {
+    if (refreshing || !signedInUserId || sheetOpen()) return false;
     refreshing = true;
+    const btn = document.getElementById('refreshBtn');
+    btn.disabled = true;
+    btn.textContent = 'refreshing…';
     let sheetOpened = false;
     // A sheet opened while it was loading is working on what's shown, so the new copy is thrown away and
     // tried again when the sheet closes.
     const ok = await loadAll(() => !(sheetOpened = sheetOpen()));
     refreshing = false;
-    if (ok) render();
-    else if (!sheetOpened) showToast("Couldn't refresh — showing what was loaded earlier");
+    btn.disabled = false;
+    btn.textContent = 'refresh';
+    if (ok) {
+      render();
+      if (manual) showToast('Up to date');
+    } else if (!sheetOpened) {
+      showToast(loadedAt ? "Couldn't refresh — showing what was loaded earlier" : "Couldn't refresh — check your connection");
+    }
+    return ok;
   }
+
+  document.getElementById('refreshBtn').addEventListener('click', () => refresh(true));
 
   document.addEventListener('visibilitychange', refreshIfStale);
   window.addEventListener('pageshow', refreshIfStale);
