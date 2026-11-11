@@ -528,6 +528,30 @@
       return { allowance: goal.target, used, left: Math.max(0, goal.target - used), over: used > goal.target, ...cycle };
     };
 
+    // A periodic-reset goal's last `count` cycles, oldest first, this one (in progress) included — the history
+    // behind `goalAllowance`, for a "by cycle" chart. Each cycle's usage stands on its own: unused room never
+    // carried over, so there's nothing to add back. Every cycle uses today's allowance (`goal.target`), same as
+    // budgets use today's allowance for past pay periods.
+    L.goalAllowanceHistory = (goal, count = 6) => {
+      if (!goal.resetFrequency) return [];
+      const today = startOfToday();
+      const schedule = { frequency: goal.resetFrequency, startDate: goal.resetStart };
+      const bounds = [];
+      for (const d of occurrencesFrom(schedule, parseLocalDate(goal.resetStart))) {
+        bounds.push(d);
+        if (d > today) break;
+      }
+      const cycles = [];
+      for (let i = Math.max(0, bounds.length - 1 - count); i < bounds.length - 1; i++) {
+        const start = bounds[i], end = bounds[i + 1];
+        const used = Math.max(0, data.deposits.filter(d => d.goalId === goal.id && !d.paidOut &&
+          new Date(d.createdAt) >= start && new Date(d.createdAt) < end)
+          .reduce((s, d) => s + d.amount, 0));
+        cycles.push({ start, end, used, allowance: goal.target, over: used > goal.target, current: end > today });
+      }
+      return cycles;
+    };
+
     // How many pay periods in a row, this one included, a dated goal has been behind the same steady line
     // `projectGoal` checks against — so a goal that's merely behind today reads the same as one that's been
     // quietly slipping for months, unless something also looks across periods. 0 if it isn't behind right now,
@@ -604,7 +628,15 @@
         byAccount.set(a.id, accountState(a, data.accountEntries, data.transfers, today, moves).isaUsed);
       });
       const used = [...byAccount.values()].reduce((s, v) => s + v, 0);
-      return { used, left: ISA_ALLOWANCE - used, byAccount, resetsOn: new Date(taxYearStart(today).getFullYear() + 1, 3, 6) };
+      const yearStart = taxYearStart(today);
+      const resetsOn = new Date(yearStart.getFullYear() + 1, 3, 6);
+      // At the average rate used so far this tax year, what you'd end up having used by 6 April — never more
+      // than the allowance itself, since using it all is the most "on pace" gets.
+      const daysElapsed = Math.max(1, Math.round((today - yearStart) / 86400000));
+      const daysLeft = Math.max(0, Math.round((resetsOn - today) / 86400000));
+      const daysTotal = Math.round((resetsOn - yearStart) / 86400000);
+      const pace = Math.min(ISA_ALLOWANCE, (used / daysElapsed) * daysTotal);
+      return { used, left: ISA_ALLOWANCE - used, byAccount, resetsOn, daysLeft, pace };
     };
 
     L.accountInfo = account => {

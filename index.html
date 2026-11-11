@@ -1284,6 +1284,8 @@
   let accountEntries = []; // savings account balances as entered, oldest first
   let transfers = [];      // money moved between the current account and a savings account
   let accountsReady = false; // false until migration 003 has been run; accounts stay hidden until then
+  let billAmountHistory = []; // a bill's past amounts, oldest first, recorded whenever its amount is edited
+  let billHistoryReady = false; // false until migration 009 has been run; price-change notes stay hidden until then
   const showArchived = { goals: false, bills: false, budgets: false, accounts: false };
   let showOverviewHistory = false; // the Overview's History section (charts and past pay) starts closed
 
@@ -1309,7 +1311,7 @@
     get accountEntries() { return accountEntries; }, get transfers() { return transfers; }
   });
   const {
-    paymentFor, firstUnpaid, unpaidBetween, payOn, goalPlan, goalBehindStreak, goalAllowance, budgetUse, liveGoals, liveBudgets, liveAccounts,
+    paymentFor, firstUnpaid, unpaidBetween, payOn, goalPlan, goalBehindStreak, goalAllowance, goalAllowanceHistory, budgetUse, liveGoals, liveBudgets, liveAccounts,
     accountOf, accountInfo, standingBetween, standingDone, accountSaving, balanceOutlook, goalHeld, heldIn, heldTotal, paidOut
   } = L;
   const { hasTarget } = LedgerCore;
@@ -1351,7 +1353,7 @@
     const optional = p => p.catch(e => { if (isMissingTable(e)) return null; throw e; });
     let r;
     try {
-      const [g, d, b, p, bu, s, ba, a, ae, t] = await Promise.all([
+      const [g, d, b, p, bu, s, ba, a, ae, t, bah] = await Promise.all([
         fetchAll(() => sb.from('goals').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('id')),
         fetchAll(() => sb.from('deposits').select('*').order('created_at', { ascending: true }).order('id')),
         fetchAll(() => sb.from('bills').select('*').order('created_at', { ascending: true }).order('id')),
@@ -1361,9 +1363,10 @@
         fetchAll(() => sb.from('balances').select('*').order('created_at', { ascending: true }).order('id')),
         optional(fetchAll(() => sb.from('accounts').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }).order('id'))),
         optional(fetchAll(() => sb.from('account_balances').select('*').order('created_at', { ascending: true }).order('id'))),
-        optional(fetchAll(() => sb.from('transfers').select('*').order('moved_on', { ascending: true }).order('id')))
+        optional(fetchAll(() => sb.from('transfers').select('*').order('moved_on', { ascending: true }).order('id'))),
+        optional(fetchAll(() => sb.from('bill_amount_history').select('*').order('created_at', { ascending: true }).order('id')))
       ]);
-      r = { g, d, b, p, bu, s, ba, a, ae, t };
+      r = { g, d, b, p, bu, s, ba, a, ae, t, bah };
     } catch (e) {
       return false;
     }
@@ -1382,6 +1385,8 @@
     accounts = accountsReady ? r.a.map(fromAccountRow) : [];
     accountEntries = accountsReady ? r.ae.map(fromAccountEntryRow) : [];
     transfers = accountsReady ? r.t.map(fromTransferRow) : [];
+    billHistoryReady = r.bah !== null;
+    billAmountHistory = billHistoryReady ? r.bah.map(h => ({ id: h.id, billId: h.bill_id, amount: Number(h.amount), createdAt: h.created_at })) : [];
     loadedAt = Date.now();
     loadedDay = toISODate(startOfToday());
     return true;
@@ -1907,6 +1912,12 @@
         ].filter(Boolean);
         notes.push(`<div class="account-note ${isa.used > ISA_ALLOWANCE + 0.005 ? 'warn' : ''}">ISA allowance: ${used}${extras.length ? ` (${extras.join('; ')})` : ''} · resets ${shortDate(isa.resetsOn)}
           <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div>`);
+        // Only worth a note once there's meaningfully more allowance to use — not once it's already used in full.
+        if (isa.left > 0.005) {
+          notes.push(isa.daysLeft <= 60 && isa.left > 500
+            ? `<div class="account-note warn">Only ${isa.daysLeft} day${isa.daysLeft === 1 ? '' : 's'} left to use the ${formatMoney(isa.left)} still unused this tax year</div>`
+            : `<div class="account-note">At this pace, about ${formatMoney(isa.pace)} used by 6 Apr</div>`);
+        }
       }
       if (a.monthlyLimit) {
         const over = info.paidInThisMonth > a.monthlyLimit + 0.005;
@@ -3251,6 +3262,25 @@
       : { kind: 'line', points, height: 150, label: `${goal.name}: put in over time, now ${formatMoney(total)}` });
   }
 
+  // A periodic-reset goal's lifetime total climbs past the allowance every cycle, so the running-total chart
+  // above (with a flat target line) would be misleading for it — this shows each cycle's own usage instead,
+  // the same "by period, against an allowance" chart the Budgets tab uses.
+  function drawGoalCycles(goal) {
+    const history = goalAllowanceHistory(goal, 6);
+    if (history.length < 2) { clearChart(historyChart); return; }
+    const cycleLabel = d => d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+    const columns = history.map(c => ({
+      label: cycleLabel(c.start), value: c.used, faded: c.current, current: c.current,
+      tip: `<div class="tip-title">${shortDate(c.start)} → ${shortDate(addDays(c.end, -1))}${c.current ? ' · so far' : ''}</div>
+        <div class="tip-row"><span>Used</span><b>${formatMoney(c.used)}</b></div>
+        <div class="tip-row"><span>Allowance</span><b>${formatMoney(c.allowance)}</b></div>`
+    }));
+    mountChart(historyChart, {
+      kind: 'columns', columns, target: goal.target, height: 150,
+      label: `${goal.name}: used per cycle, against a ${formatMoney(goal.target)} allowance`
+    });
+  }
+
   // " · in Cash ISA", " · paid out from Cash ISA" and so on: where an entry's money is kept, or came from.
   function linkedNote(dep, goal) {
     const a = dep.accountId && accounts.find(x => x.id === dep.accountId);
@@ -3271,7 +3301,7 @@
     historyOverlay.classList.add('open');
     try {
       const deposits = await loadDeposits(goalId);
-      drawGoalGrowth(g, deposits);
+      if (g.resetFrequency) drawGoalCycles(g); else drawGoalGrowth(g, deposits);
       if (deposits.length === 0) {
         historyList.innerHTML = '<div class="history-empty">No entries yet.</div>';
         return;
@@ -3301,6 +3331,22 @@
     historyOverlay.classList.remove('open');
   });
   historyOverlay.addEventListener('click', (e) => { if (e.target === historyOverlay) historyOverlay.classList.remove('open'); });
+
+  // Records what a bill's amount was, right before changing it to something else, so the old one isn't lost.
+  async function recordBillAmountChange(billId, oldAmount) {
+    const { data, error } = await sb.from('bill_amount_history').insert([{ bill_id: billId, amount: oldAmount }]).select();
+    if (error) throw error;
+    billAmountHistory.push({ id: data[0].id, billId, amount: oldAmount, createdAt: data[0].created_at });
+  }
+
+  // The most recent recorded amount change for a bill, if any — "£22 → £26 since 3 Mar" on the Bills tab.
+  function billPriceChange(bill) {
+    if (!billHistoryReady) return null;
+    const rows = billAmountHistory.filter(h => h.billId === bill.id);
+    if (!rows.length) return null;
+    const last = rows.reduce((a, b) => new Date(b.createdAt) > new Date(a.createdAt) ? b : a);
+    return { from: last.amount, since: last.createdAt };
+  }
 
   // ---------- Bills render ----------
   const UNCATEGORISED = 'Uncategorised';
@@ -3369,6 +3415,8 @@
       const dueISO = due ? toISODate(due) : '';
       // What a recurring bill costs over a year, unless it's finished. Not shown for yearly ones, where it's the amount.
       const yearly = due && b.frequency !== 'once' && b.frequency !== 'yearly' ? ` · ${formatMoney(b.amount * PER_MONTH[b.frequency] * 12)} a year` : '';
+      const priceChange = billPriceChange(b);
+      const priceChangeNote = priceChange ? ` · was ${formatMoney(priceChange.from)} until ${formatDate(priceChange.since)}` : '';
       return `
         <div class="goal ${soon ? 'soon' : ''} ${overdue ? 'overdue' : ''} ${!due ? 'past' : ''}">
           <div class="goal-head">
@@ -3379,7 +3427,7 @@
           </div>
           ${b.category ? `<div class="badge-category">${escapeHtml(b.category)}</div>` : ''}
           <div class="bill-foot">
-            <div class="bill-due">${FREQUENCY_LABELS[b.frequency]} · ${status}${left ? ` · ${left} left` : ''}${yearly}</div>
+            <div class="bill-due">${FREQUENCY_LABELS[b.frequency]} · ${status}${left ? ` · ${left} left` : ''}${yearly}${priceChangeNote}</div>
             <div class="bill-amount">${formatMoney(b.amount)}</div>
           </div>
           <div class="bill-actions">
@@ -4378,6 +4426,9 @@
       } else {
         bills.push(await createBillRemote({ ...fields, kind: editingBillKind }));
       }
+      if (editing && billHistoryReady && Math.abs(editing.amount - amount) >= 0.005) {
+        await recordBillAmountChange(editing.id, editing.amount);
+      }
       if (editing) Object.assign(editing, { name, amount, frequency, startDate, endDate, category });
       render();
       closeBillSheet();
@@ -5199,6 +5250,8 @@
     accountEntries = [];
     transfers = [];
     accountsReady = false;
+    billAmountHistory = [];
+    billHistoryReady = false;
     loadedAt = 0;
     loadedDay = '';
   }

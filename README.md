@@ -29,7 +29,9 @@ There's no build step. GitHub Pages serves the files as they are.
   "Mark paid" records the usual amount, and "Other amount" records a different one for bills that vary.
   Each recurring bill and category also shows what it costs over a year. The Bills tab's totals show the
   monthly average and what's left to pay this pay period (anything still unpaid up to the day before payday,
-  overdue bills included).
+  overdue bills included). Editing a bill's amount keeps what it was before, so the Bills tab can show
+  "was £22 until 3 Mar" rather than losing it — a one-off "Other amount" payment isn't a price change, so it
+  isn't recorded here.
 - **Yearly bills pot.** Yearly and quarterly bills are budgeted a month at a time: a twelfth (or a third) of
   each counts in every pay period, and the bill itself isn't counted when it lands. The Bills tab lists them with
   how much should be put by today so each is covered on its due date. The app doesn't track the pot's real
@@ -108,10 +110,11 @@ Row-level security limits each user to their own rows.
 
 | Table | Columns | Notes |
 |---|---|---|
-| `goals` | `name`, `target`, `saved`, `category`, `target_date`, `monthly_amount`, `sort_order`, `archived`, `account_id`, `straight_out`, `monthly_day` | `saved` is what the goal has saved, kept up to date by a trigger on `deposits` (pay outs left out). Never write it directly. `target` empty = open-ended (migration 006). `account_id` is only the usual account. |
+| `goals` | `name`, `target`, `saved`, `category`, `target_date`, `monthly_amount`, `sort_order`, `archived`, `account_id`, `straight_out`, `monthly_day`, `reset_frequency`, `reset_start` | `saved` is what the goal has saved, kept up to date by a trigger on `deposits` (pay outs left out). Never write it directly. `target` empty = open-ended (migration 006). `account_id` is only the usual account. `reset_frequency`/`reset_start` (migration 008) make it a periodic-reset goal instead, with `target` as the allowance per cycle. |
 | `deposits` | `goal_id`, `amount`, `note`, `external`, `account_id`, `paid_out`, `transfer_id` | Goal entries. Negative = taken out, 0 = skipped month. `external` (migration 005) = from outside your income. From migration 006: `account_id` = where the money is kept (null = current account), or for a straight-out goal where it was paid from; `paid_out` = spent (a pay out); `transfer_id` = the transfer that moved it, which several entries can share. |
 | `bills` | `name`, `amount`, `frequency`, `start_date`, `end_date`, `kind` (`bill` / `income`), `category`, `archived` | Also holds income sources and monthly pay. |
 | `bill_payments` | `bill_id`, `due_date`, `amount`, `paid_at` | One row per occurrence marked paid. |
+| `bill_amount_history` | `bill_id`, `amount` | Added in migration 009. One row per past amount, recorded when a bill's amount is edited (not for a one-off "Other amount" payment). |
 | `budgets` | `name`, `amount`, `sort_order`, `archived` | Added in migration 001. |
 | `spends` | `budget_id`, `amount`, `note`, `spent_on` | Added in migration 001. Negative = refund. |
 | `balances` | `amount` | Added in migration 002. One row per balance update; the newest is the current one. Negative = overdrawn. |
@@ -151,6 +154,9 @@ Deploy the matching app code only *after* running the migration.
 
   They run as the signed-in user, so row-level security still applies. Only signed-in users can call them. The
   app needs this from the 9 Nov 2026 release on.
+- `008_goal_reset_allowance.sql` adds `goals.reset_frequency` and `goals.reset_start`, for a periodic-reset goal.
+- `009_bill_amount_history.sql` creates `bill_amount_history`. Until it's run the app works as before, with no
+  "was £X until DATE" note on a bill that's had its amount changed.
 
 The SQL files for 001–006 were lost. Only 001 survives, in the GitHub history (deleted on 4 Oct 2026). For a
 record of the schema they built, see the export from 9 Nov 2026 in `supabase/`:

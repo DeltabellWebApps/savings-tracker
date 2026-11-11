@@ -315,7 +315,11 @@ function goalLine(L, g) {
   if (p.overdue) return `Target date passed · ${money(p.remaining)} to go`;
   if (p.skip && !isDone(g)) return 'Skipped this month';
   if (p.planned > 0 && p.savedThisPeriod >= p.planned) return `✓ ${money(p.savedThisPeriod)} saved this month`;
-  if (p.projection) return p.projection.text;
+  if (p.projection) {
+    // Same "chronic" callout as the website: behind for 3 pay periods running (this one included), not just today.
+    const streak = p.projection.tone === 'behind' ? L.goalBehindStreak(g) : 0;
+    return streak >= 3 ? `${p.projection.text} · ${streak} periods running` : p.projection.text;
+  }
   if (p.planned > 0) return `Save ${money(p.planned)}/mo`;
   return null;
 }
