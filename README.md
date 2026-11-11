@@ -31,7 +31,9 @@ There's no build step. GitHub Pages serves the files as they are.
   monthly average and what's left to pay this pay period (anything still unpaid up to the day before payday,
   overdue bills included). Editing a bill's amount keeps what it was before, so the Bills tab can show
   "was £22 until 3 Mar" rather than losing it — a one-off "Other amount" payment isn't a price change, so it
-  isn't recorded here.
+  isn't recorded here. Once at least one bill's amount has changed in the last year, the totals also show the
+  net effect across all of them, converted to a monthly rate (e.g. "+£3/mo bills up over the last year · 1
+  changed") — `billsYearlyTrend()` in `index.html`.
 - **Yearly bills pot.** Yearly and quarterly bills are budgeted a month at a time: a twelfth (or a third) of
   each counts in every pay period, and the bill itself isn't counted when it lands. The Bills tab lists them with
   how much should be put by today so each is covered on its due date. The app doesn't track the pot's real
@@ -41,8 +43,10 @@ There's no build step. GitHub Pages serves the files as they are.
   on a cycle. The target is optional: a goal without one is open-ended and asks for its monthly amount every
   month. A £0 deposit marks a month as skipped. Each goal shows a projection: ahead of or behind a steady pace
   for dated goals, or an estimated finish month for the others; a goal behind schedule for 3 pay periods running
-  is called out as chronic, not just behind today. A monthly amount can have a day of the month, which puts it
-  in "Coming up" with a "Done" button.
+  is called out as chronic, not just behind today. A dated goal that's behind schedule gets a "Catch up" button
+  that opens "+ Add" pre-filled with exactly the gap to the steady-pace line (capped at what it still needs in
+  total), so getting back on track is one tap plus confirming. A monthly amount can have a day of the month,
+  which puts it in "Coming up" with a "Done" button.
   - A goal that **resets on a cycle** (monthly, every 3 months, or yearly, from a date you set) is for an
     allowance that renews rather than a one-off target — e.g. a mortgage's yearly overpayment limit. The target
     amount becomes what's allowed each cycle; unused room doesn't carry over. It's never "done", has no pacing
@@ -90,6 +94,13 @@ There's no build step. GitHub Pages serves the files as they are.
   The charts and past pay are in a History section at the bottom, closed to start with — including, once there's
   a savings account, a combined "Net worth over time" chart (current account plus savings, the history behind
   the "Total" figure on the Savings card).
+  - The first time the Overview loads after a new pay period has started, it shows a dismissible **recap** of
+    the one that just finished: left over, net money saved towards goals, any budget that went over, and any
+    bill price change recorded during it. It's worked out straight from the records (not the plan-vs-actual
+    figures the rest of the Overview uses, which are built around the period still in progress), and shown once
+    per period (tracked in `localStorage`, so it survives a reload but not the next payday) — including, the
+    first time this runs, a recap of whichever period was last to finish before then, if there's anything in it
+    worth saying. `buildRecap()` in `index.html`.
 - **Bank balance.** You enter your current account balance by hand (a second update on the same day replaces
   that day's). The Overview carries it forward to the day before payday: bills still to come out, income still to
   come in, savings still to move this month (standing orders on their dates), and what's left in budgets
@@ -97,6 +108,8 @@ There's no build step. GitHub Pages serves the files as they are.
   already in an account doesn't. For goals with no account, deposits are assumed to leave the current account.
   Anything marked paid, moved or spent after you entered the balance comes off too. It also shows the lowest point before payday, warns if you'd go overdrawn,
   and suggests how much you could move to a goal (one that's behind schedule first) without going below £0.
+  A projected overdraft also gets a banner right at the top of the Overview, above everything else, so it
+  doesn't depend on scrolling down to the balance statement to notice.
   The rules are in `balanceOutlook()` in `index.html` and `balanceForecast()` in `ledger-core.js`.
 - **Archiving** hides a goal, bill, income source or budget from every list, total and chart without
   deleting its history. You can restore it from the "Archived" list at the bottom of its tab.

@@ -102,6 +102,7 @@
     font-size: 22px;
     font-weight: 500;
   }
+  .totals .item .num.negative { color: var(--danger); }
   .totals .item .lbl {
     font-size: 11px;
     color: var(--ink-soft);
@@ -469,6 +470,23 @@
   .balance-note { font-size: 11.5px; color: var(--ink-soft); padding: 11px 0; border-bottom: 1px solid var(--line); }
   .balance-note:last-child { border-bottom: none; }
   .balance-note.warn { color: var(--danger); font-weight: 500; }
+  .overview-alert {
+    background: var(--paper-raised);
+    border: 1px solid var(--danger);
+    border-left: 4px solid var(--danger);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    font-size: 12.5px;
+    color: var(--danger);
+    font-weight: 500;
+  }
+  .overview-alert .meta { display: block; color: var(--ink-soft); font-weight: 400; margin-top: 2px; }
+  .recap-card .recap-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 11.5px; color: var(--ink-soft); padding: 10px 0 2px;
+  }
+  .recap-dismiss { background: none; border: none; color: var(--ink-soft); font-size: 11px; text-decoration: underline; cursor: pointer; padding: 0; }
   .section-title {
     font-family: 'Fraunces', serif;
     font-size: 17px;
@@ -1288,6 +1306,9 @@
   let billHistoryReady = false; // false until migration 009 has been run; price-change notes stay hidden until then
   const showArchived = { goals: false, bills: false, budgets: false, accounts: false };
   let showOverviewHistory = false; // the Overview's History section (charts and past pay) starts closed
+  const RECAP_SEEN_KEY = 'ledger-recap-period-seen';
+  let recapCard; // undefined until decided this session; null once decided there's nothing to show
+  let recapDismissed = false;
 
   const {
     FREQUENCY_LABELS, parseLocalDate, toISODate, startOfToday, addDays, lastDayOfMonth,
@@ -1766,6 +1787,10 @@
       const streak = !allowance && plan.projection && plan.projection.tone === 'behind' ? goalBehindStreak(g) : 0;
       const projectionHtml = !allowance && plan.projection
         ? `<div class="projection-line ${plan.projection.tone === 'behind' ? 'behind' : ''} ${streak >= 3 ? 'chronic' : ''}">${plan.projection.text}${streak >= 3 ? ` · ${streak} periods running` : ''}</div>` : '';
+      // One tap to add exactly what's needed to get back on the steady-pace line projectGoal checks against —
+      // capped at what the goal still needs in total, in case that's less than the behind-schedule gap.
+      const catchUp = !allowance && plan.projection && plan.projection.tone === 'behind'
+        ? Math.max(0.01, Math.round(Math.min(plan.projection.behindBy, plan.remaining) * 100) / 100) : 0;
       // Where its money is now, and what's been spent. Only worth saying when it isn't simply "all of it, in its
       // usual account".
       const heldParts = [...held.entries()].sort((x, y) => y[1] - x[1])
@@ -1790,6 +1815,8 @@
         if (plan.skip) skipBtnHtml = `<button class="btn-small unskip-goal" data-id="${plan.skip.id}">Unskip</button>`;
         else if (plan.planned > 0 && plan.savedThisPeriod < plan.planned) skipBtnHtml = `<button class="btn-small skip-goal" data-id="${g.id}">Skip month</button>`;
       }
+      const catchUpBtnHtml = catchUp > 0
+        ? `<button class="btn-small catch-up-goal" data-id="${g.id}" data-amount="${catchUp}">Catch up ${formatMoney(catchUp)}</button>` : '';
       const handleHtml = displayed.length > 1
         ? `<button class="drag-handle" data-id="${g.id}" aria-label="Reorder ${escapeHtml(g.name)} — drag, or use the arrow keys">⠿</button>` : '';
       return `
@@ -1809,6 +1836,7 @@
             <div class="goal-amounts">${amountsHtml}</div>
             <div class="goal-actions">
               <button class="btn-small history-btn" data-id="${g.id}">History</button>
+              ${catchUpBtnHtml}
               ${skipBtnHtml}
               ${mainBtn}
             </div>
@@ -1818,6 +1846,7 @@
     }).join('');
 
     list.querySelectorAll('.add-deposit').forEach(btn => btn.addEventListener('click', () => openAddToGoal(btn.dataset.id)));
+    list.querySelectorAll('.catch-up-goal').forEach(btn => btn.addEventListener('click', () => openAddToGoal(btn.dataset.id, Number(btn.dataset.amount))));
     list.querySelectorAll('.pay-out').forEach(btn => btn.addEventListener('click', () => openPayOut(btn.dataset.id)));
     list.querySelectorAll('.edit-goal').forEach(btn => btn.addEventListener('click', () => openGoalSheet(btn.dataset.id)));
     list.querySelectorAll('.history-btn').forEach(btn => btn.addEventListener('click', () => openHistorySheet(btn.dataset.id)));
@@ -3348,6 +3377,24 @@
     return { from: last.amount, since: last.createdAt };
   }
 
+  // How bills as a whole have moved over the last year: each bill's earliest recorded change in that window
+  // (its amount just before that change) against what it costs now, converted to a monthly rate so a yearly
+  // bill's jump doesn't dwarf a weekly one's. Null once there's nothing recorded yet, or no change in the window.
+  function billsYearlyTrend(list) {
+    if (!billHistoryReady) return null;
+    const since = addDays(startOfToday(), -365);
+    let delta = 0, changed = 0;
+    list.forEach(b => {
+      const rows = billAmountHistory.filter(h => h.billId === b.id && new Date(h.createdAt) >= since);
+      if (!rows.length) return;
+      const earliest = rows.reduce((a, r) => new Date(r.createdAt) < new Date(a.createdAt) ? r : a);
+      if (Math.abs(b.amount - earliest.amount) < 0.005) return;
+      delta += (b.amount - earliest.amount) * PER_MONTH[b.frequency];
+      changed++;
+    });
+    return changed ? { delta, changed } : null;
+  }
+
   // ---------- Bills render ----------
   const UNCATEGORISED = 'Uncategorised';
 
@@ -3383,6 +3430,7 @@
     const monthly = monthlyAverage(shown, today);
     const outstanding = shown.reduce((s, b) => s + b.amount * unpaidBetween(b, trackFrom(b), period.end).length, 0);
     const scope = activeBillCategory === 'All' ? '' : ` · ${escapeHtml(activeBillCategory)}`;
+    const trend = billsYearlyTrend(shown);
     totalsEl.style.display = 'flex';
     totalsEl.innerHTML = `
       <div class="item">
@@ -3393,6 +3441,11 @@
         <div class="num">${formatMoney(outstanding)}</div>
         <div class="lbl">left to pay this pay period</div>
       </div>
+      ${trend ? `
+      <div class="item">
+        <div class="num ${trend.delta > 0 ? 'negative' : ''}">${trend.delta >= 0 ? '+' : '−'}${formatMoney(Math.abs(trend.delta))}/mo</div>
+        <div class="lbl">bills ${trend.delta >= 0 ? 'up' : 'down'} over the last year · ${trend.changed} changed</div>
+      </div>` : ''}
     `;
 
     if (shown.length === 0) {
@@ -3621,11 +3674,83 @@
     }
   });
 
+  // ---------- Pay-period recap ----------
+  // What happened last pay period — shown once, the first time the Overview loads after a new one has started
+  // (see renderOverview). Worked out straight from the raw records rather than reusing periodSummary/goalPlan,
+  // which are built around the *current* period's plans; this just reports what already happened, so there's
+  // no plan-vs-actual framing to get right for a period that's over. Null when there's nothing worth saying.
+  function buildRecap() {
+    const period = payPeriodFor(startOfToday(), 1); // the pay period that just finished
+    const from = toISODate(period.start), to = toISODate(period.end);
+
+    const billsOnly = bills.filter(b => b.kind === 'bill' && !b.archived);
+    const otherIncome = bills.filter(b => b.kind === 'income' && !isPay(b) && !b.archived);
+    const pay = payOn(from);
+    let income = pay ? pay.amount : 0;
+    otherIncome.forEach(b => occurrencesBetween(b, period.start, period.end).filter(d => d >= trackFrom(b))
+      .forEach(() => { income += b.amount; }));
+    let billsTotal = 0;
+    billsOnly.forEach(b => {
+      occurrencesBetween(b, period.start, period.end).forEach(d => {
+        if (isPotBill(b)) return;
+        const p = paymentFor(b, d);
+        if (!p && d < trackFrom(b)) return;
+        billsTotal += p ? p.amount : b.amount;
+      });
+    });
+    const potMonthly = yearlyBillsPot(billsOnly, period.end).monthly;
+    const leftOver = income - billsTotal - potMonthly;
+
+    // Budgets that went over, using that period's spends — pastSpends reaches back far enough (see
+    // BUDGET_HISTORY_PERIODS) to cover the one period just finished.
+    const spends = pastSpends.concat(periodSpends).filter(s => s.spentOn >= from && s.spentOn <= to);
+    const overBudgets = liveBudgets().map(b => {
+      const spent = spends.filter(s => s.budgetId === b.id).reduce((s, x) => s + x.amount, 0);
+      return { b, over: spent - b.amount };
+    }).filter(x => x.over > 0.005);
+
+    // Net money actually moved into goals (not pay-outs, not money from outside your income) — a plain "what
+    // happened" total, not the plan/committed framing goalPlan uses for the period still in progress.
+    const goalSaved = allDeposits.filter(d => !d.paidOut && !d.external && d.amount > 0 &&
+      new Date(d.createdAt) >= period.start && new Date(d.createdAt) <= period.end)
+      .reduce((s, d) => s + d.amount, 0);
+
+    const priceChanges = billHistoryReady ? billAmountHistory
+      .filter(h => new Date(h.createdAt) >= period.start && new Date(h.createdAt) <= period.end)
+      .map(h => {
+        const bill = bills.find(b => b.id === h.billId);
+        return bill ? { name: bill.name, from: h.amount, to: bill.amount } : null;
+      }).filter(Boolean) : [];
+
+    if (Math.abs(leftOver) < 0.005 && goalSaved < 0.005 && overBudgets.length === 0 && priceChanges.length === 0) return null;
+    return { period, leftOver, overBudgets, goalSaved, priceChanges };
+  }
+
+  function recapCardHtml(r) {
+    const neg = n => n < 0 ? 'negative' : '';
+    const rows = [
+      `<div class="statement-row"><div>Left over<span class="meta">pay minus bills</span></div><div class="amt ${neg(r.leftOver)}">${formatMoney(r.leftOver)}</div></div>`,
+      r.goalSaved > 0.005
+        ? `<div class="statement-row"><div>Saved towards goals</div><div class="amt">${formatMoney(r.goalSaved)}</div></div>` : '',
+      ...r.overBudgets.map(x => `<div class="statement-row"><div>${escapeHtml(x.b.name)}<span class="meta">over budget</span></div><div class="amt negative">+${formatMoney(x.over)}</div></div>`),
+      ...r.priceChanges.map(p => `<div class="statement-row"><div>${escapeHtml(p.name)}<span class="meta">price changed</span></div><div class="amt">${formatMoney(p.from)} → ${formatMoney(p.to)}</div></div>`)
+    ].filter(Boolean).join('');
+    return `
+      <div class="statement recap-card">
+        <div class="recap-head">
+          <span>Last pay period · ${shortDate(r.period.start)} → ${shortDate(r.period.end)}</span>
+          <button class="recap-dismiss" id="dismissRecap">Dismiss</button>
+        </div>
+        ${rows}
+      </div>`;
+  }
+
   // ---------- Overview render ----------
   function renderOverview() {
     const el = document.getElementById('overviewContent');
     const neg = n => n < 0 ? 'negative' : '';
     let html = '';
+    let alertHtml = ''; // a prominent banner above everything else — set below if the balance looks overdrawn
 
     // ---------- Pay period summary ----------
     // The sums come from LedgerCore (ledger().periodSummary), shared with the widget.
@@ -3634,6 +3759,23 @@
       today, period, billsOnly, otherIncome, pay, otherItems, potLumpTotal, potLumpCount, potMonthly, leftOver,
       budgetsCommitted, budgetsSpent, income, free
     } = sum;
+
+    // Last pay period's recap: shown once, the first time the Overview loads after a new pay period has
+    // started. Decided once per session and cached, so a later re-render here (a data refresh, a toggle)
+    // doesn't throw it away before the user's dismissed it or moved on; `localStorage` carries "seen" across
+    // reloads so it doesn't come back once the period's moved on, even in a fresh session.
+    if (recapCard === undefined) {
+      const periodStartISO = toISODate(period.start);
+      let seen = null;
+      try { seen = localStorage.getItem(RECAP_SEEN_KEY); } catch (e) {}
+      if (seen === periodStartISO) {
+        recapCard = null;
+      } else {
+        recapCard = buildRecap();
+        try { localStorage.setItem(RECAP_SEEN_KEY, periodStartISO); } catch (e) {}
+      }
+    }
+    const recapHtml = recapCard && !recapDismissed ? recapCardHtml(recapCard) : '';
     const periodBillsTotal = sum.billsTotal;
     const periodLabel = `${shortDate(period.start)} → ${shortDate(period.end)}`;
     const paydayISO = toISODate(period.start);
@@ -3755,6 +3897,9 @@
         const dayName = d => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
         const lowWhen = dayName(fc.lowDate);
         if (fc.overdrawnDate) {
+          // Also at the very top of the page — this matters enough not to depend on scrolling down to find it.
+          alertHtml = `<div class="overview-alert">Balance projected to go overdrawn on ${dayName(fc.overdrawnDate)}
+            <span class="meta">Down to ${formatMoney(fc.low)} by ${lowWhen}.</span></div>`;
           html += `<div class="balance-note warn">Goes overdrawn on ${dayName(fc.overdrawnDate)}, down to ${formatMoney(fc.low)} by ${lowWhen}.</div>`;
         } else if (fc.lowDate < period.end) {
           html += `<div class="balance-note">Lowest point ${formatMoney(fc.low)} on ${lowWhen}.</div>`;
@@ -4098,7 +4243,9 @@
     }
     const chartsShown = showOverviewHistory;
 
-    el.innerHTML = html;
+    el.innerHTML = alertHtml + recapHtml + html;
+    const dismissRecap = document.getElementById('dismissRecap');
+    if (dismissRecap) dismissRecap.addEventListener('click', () => { recapDismissed = true; renderOverview(); });
     const historyToggle = document.getElementById('overviewHistoryToggle');
     if (historyToggle) historyToggle.addEventListener('click', () => { showOverviewHistory = !showOverviewHistory; renderOverview(); });
     el.querySelectorAll('.split-bar .seg').forEach(seg => {
@@ -5252,6 +5399,8 @@
     accountsReady = false;
     billAmountHistory = [];
     billHistoryReady = false;
+    recapCard = undefined;
+    recapDismissed = false;
     loadedAt = 0;
     loadedDay = '';
   }
