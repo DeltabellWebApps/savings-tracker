@@ -232,19 +232,23 @@
     const remainingAtStart = remaining + savedThisPeriod + fromOutside;
     const plan = { planned: 0, savedThisPeriod, fromOutside, skip, remaining, overdue: false, dueLabel: null, afterSkip: 0 };
 
-    if (goal.targetDate) {
-      const due = parseLocalDate(goal.targetDate);
-      plan.dueLabel = monthShort(due);
-      if (due <= startOfToday()) {
-        plan.overdue = remaining > 0;
-      } else if (remainingAtStart > 0) {
-        const monthsLeft = Math.max(1, Math.ceil((due - period.start) / AVG_MONTH_MS));
-        plan.planned = remainingAtStart / monthsLeft;
-        plan.afterSkip = Math.max(0, remaining) / Math.max(1, monthsLeft - 1);
+    // A goal that's already saved its target in full (even if this period's money came from reassigning what
+    // was already in its account, so doesn't count towards `savedThisPeriod`) doesn't ask for anything more.
+    if (!isDone(goal)) {
+      if (goal.targetDate) {
+        const due = parseLocalDate(goal.targetDate);
+        plan.dueLabel = monthShort(due);
+        if (due <= startOfToday()) {
+          plan.overdue = remaining > 0;
+        } else if (remainingAtStart > 0) {
+          const monthsLeft = Math.max(1, Math.ceil((due - period.start) / AVG_MONTH_MS));
+          plan.planned = remainingAtStart / monthsLeft;
+          plan.afterSkip = Math.max(0, remaining) / Math.max(1, monthsLeft - 1);
+        }
+      } else if (goal.monthlyAmount) {
+        plan.planned = Math.min(goal.monthlyAmount, Math.max(0, remainingAtStart));
+        plan.afterSkip = goal.monthlyAmount;
       }
-    } else if (goal.monthlyAmount) {
-      plan.planned = Math.min(goal.monthlyAmount, Math.max(0, remainingAtStart));
-      plan.afterSkip = goal.monthlyAmount;
     }
 
     plan.committed = skip ? Math.max(0, savedThisPeriod) : Math.max(plan.planned, savedThisPeriod);
@@ -504,7 +508,9 @@
 
     // A goal's usual account: where its money is kept, or for a straight-out goal where it's usually paid from.
     // Null for none (the current account). It's only the default: each entry records its own account.
-    L.accountOf = goal => goal && goal.accountId ? L.liveAccounts().find(a => a.id === goal.accountId) || null : null;
+    // Looks across archived accounts too: archiving an account a goal's money is still in shouldn't make the
+    // goal's plan start asking the current account for it again, as if the money had moved.
+    L.accountOf = goal => goal && goal.accountId ? data.accounts.find(a => a.id === goal.accountId) || null : null;
     // The account whose money this period's plan moves: none for a straight-out goal, whose money leaves the
     // current account (or whichever account it's paid from) and is never kept.
     L.planAccount = goal => goal && !goal.straightOut ? L.accountOf(goal) : null;
@@ -677,14 +683,19 @@
       const otherIncome = data.bills.filter(b => b.kind === 'income' && !isPay(b) && !b.archived);
       const pay = L.payOn(toISODate(period.start));
 
+      // Only occurrences tracked from when the bill/income source was added count — earlier ones are settled
+      // outside the app, same rule `comingUp()` and the Bills tab use. A bill that's actually been marked paid
+      // counts regardless (its payment record is its own evidence), same as `balanceOutlook()`.
       const otherItems = [];
-      otherIncome.forEach(b => occurrencesBetween(b, period.start, period.end).forEach(d => otherItems.push({ b, d })));
+      otherIncome.forEach(b => occurrencesBetween(b, period.start, period.end).filter(d => d >= trackFrom(b))
+        .forEach(d => otherItems.push({ b, d })));
       const otherTotal = otherItems.reduce((s, i) => s + i.b.amount, 0);
 
       let billsTotal = 0, potLumpTotal = 0, potLumpCount = 0;
       billsOnly.forEach(b => {
         occurrencesBetween(b, period.start, period.end).forEach(d => {
           const p = L.paymentFor(b, d);
+          if (!p && d < trackFrom(b)) return;
           const amt = p ? p.amount : b.amount;
           if (isPotBill(b)) { potLumpTotal += amt; potLumpCount++; }
           else billsTotal += amt;

@@ -1719,7 +1719,7 @@
       const heldSum = [...held.values()].reduce((s, v) => s + v, 0);
       const out = paidOut(g);
       if (plan.overdue) suggestion = `Target date passed — ${formatMoney(plan.remaining)} still needed`;
-      else if (plan.skip) suggestion = `Skipped this month · then ${formatMoney(plan.afterSkip)}/mo${by}`;
+      else if (plan.skip && !done) suggestion = `Skipped this month · then ${formatMoney(plan.afterSkip)}/mo${by}`;
       else if (plan.planned > 0 && plan.savedThisPeriod >= plan.planned) suggestion = `✓ ${formatMoney(plan.savedThisPeriod)} ${g.straightOut ? 'paid' : 'saved'} this month${plan.dueLabel ? ` · on track for ${plan.dueLabel}` : ''}`;
       else if (plan.savedThisPeriod > 0 && plan.planned > 0) suggestion = `${formatMoney(plan.savedThisPeriod)} of ${formatMoney(plan.planned)} ${g.straightOut ? 'paid' : 'saved'} this month${by}`;
       else if (plan.planned > 0) suggestion = `${g.straightOut ? 'Pay' : 'Save'} ${formatMoney(plan.planned)}/mo${by}${g.monthlyDay ? ` · due on the ${ordinal(g.monthlyDay)}` : ''}`;
@@ -1848,7 +1848,9 @@
       // Standing order: any date this period up to today not marked done gets a button; otherwise the next one.
       const so = standingOrder(a);
       if (so) {
-        const due = standingBetween(a, addDays(period.start, -31), today).filter(d => !standingDone(a, d));
+        // From whenever the account was added, not a fixed look-back, so a standing order missed for a long
+        // stretch still keeps its "Done" button instead of silently dropping off the list.
+        const due = standingBetween(a, trackFrom(so), today).filter(d => !standingDone(a, d));
         due.forEach(d => notes.push(`<div class="account-note ${d < today ? 'warn' : ''}" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
           <span>Standing order ${formatMoney(a.standingAmount)} · ${d < today ? 'was due' : 'due today'} ${shortDate(d)}</span>
           <button class="btn-small standing-done" data-id="${a.id}" data-date="${toISODate(d)}">Done</button></div>`));
@@ -2031,6 +2033,19 @@
       isa_paid_before: isaPaid || null,
       isa_paid_before_year: isaPaid ? toISODate(LedgerCore.taxYearStart(startOfToday())) : null
     };
+
+    if (editingAccountId) {
+      const existing = accounts.find(a => a.id === editingAccountId);
+      const losing = [];
+      if (existing.kind === 'saver' && kind !== 'saver' && (existing.monthlyLimit || existing.maturesOn)) losing.push('its monthly limit and maturity date');
+      if (existing.kind === 'isa' && kind !== 'isa' && (existing.flexible || existing.isaPaidBefore)) losing.push('its ISA allowance settings');
+      if (losing.length) {
+        const ok = await askConfirm(`Change ${existing.name}'s type?`,
+          `Switching away from ${ACCOUNT_KINDS[existing.kind]} will clear ${losing.join(' and ')}.`, 'Switch');
+        if (!ok) return;
+      }
+    }
+
     const saveBtn = document.getElementById('saveAccount');
     saveBtn.disabled = true;
     try {
@@ -2781,6 +2796,19 @@
   document.getElementById('cancelHeld').addEventListener('click', closeHeldSheet);
   heldOverlay.addEventListener('click', (e) => { if (e.target === heldOverlay) closeHeldSheet(); });
 
+  // Keeps a goal's "usual account" (goals.account_id) matching where most of its money actually sits, so its
+  // monthly plan stops being tracked against the current account once the money's actually moved into savings
+  // (and starts being tracked there again if it's all moved or paid out). Straight-out goals are left alone:
+  // they set this by hand from the goal sheet, since each payment is a one-off rather than an ongoing balance.
+  async function syncGoalAccount(goal) {
+    if (goal.straightOut) return;
+    const held = [...goalHeld(goal).entries()].filter(([k, v]) => k && v > 0.005).sort((x, y) => y[1] - x[1]);
+    const wanted = held.length ? held[0][0] : null;
+    if (goal.accountId === wanted) return;
+    await updateGoalRemote(goal.id, { account_id: wanted });
+    goal.accountId = wanted;
+  }
+
   // Records the change to `value` as one entry, dated the chosen day (today keeps the time it was made).
   async function saveHeld(value) {
     const { goal, account, held, unassigned } = heldEdit;
@@ -2803,6 +2831,7 @@
       allDeposits.push(dep);
       allDeposits.sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
       goal.saved += diff;
+      await syncGoalAccount(goal);
       render();
       closeHeldSheet();
       showToast(value > 0.005 ? `${goal.name}: ${formatMoney(value)} in ${account.name}` : `${goal.name} removed from ${account.name}`);
@@ -3036,7 +3065,9 @@
   // "Assign" on an account: give money already there to one of its goals.
   function openAssign(accountId) {
     const info = accountInfo(accounts.find(a => a.id === accountId));
-    const first = info.goalsIn.find(g => !LedgerCore.isDone(g)) || liveGoals().find(g => !g.straightOut);
+    // Only pre-pick a goal that's actually in this account — guessing one from the whole list would look like
+    // a wrong default when the account has none yet; the user adds one with "+ Goal" instead.
+    const first = info.goalsIn.find(g => !LedgerCore.isDone(g));
     openMoveSheet({
       from: accountId, to: accountId, goalId: first && first.id,
       goalAmount: info.unassigned > 0 ? Math.round(info.unassigned * 100) / 100 : null, title: 'Give money to goals'
@@ -3118,6 +3149,7 @@
       allDeposits.push(...saved);
       allDeposits.sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
       saved.forEach(d => { if (!d.paidOut) goals.find(g => g.id === d.goalId).saved += d.amount; });
+      await Promise.all(rows.map(r => syncGoalAccount(r.goal)));
 
       render();
       closeMoveSheet();
