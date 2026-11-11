@@ -15,6 +15,7 @@ const { formatMoney, startOfToday, addDays, pctOf, isDone, ISA_ALLOWANCE } = cor
 
 const MODES = ['free', 'coming', 'savings', 'budgets'];
 const SPEND_SCRIPT = 'Ledger Spend';
+const SAVE_SCRIPT = 'Ledger Save';
 const REFRESH_MINUTES = 15;
 
 // Same palette as the web app, light and dark.
@@ -356,6 +357,8 @@ function savingsLayout(w, family, ctx) {
       w.addSpacer(4);
       addText(w, `${pctOf(top).toFixed(0)}% · ${money(top.saved)}`, Font.regularMonospacedSystemFont(10), C.soft, { scale: 0.7 });
     }
+    w.addSpacer();
+    if (ctx.saveScript) addText(w, 'Tap to add savings', Font.regularSystemFont(9), C.soft);
   } else {
     const large = family !== 'medium';
     addHeader(w, 'Savings', money(total));
@@ -456,15 +459,18 @@ function buildWidget(family, mode, loaded) {
     if (family === 'small') w.setPadding(14, 14, 14, 14);
   }
   const spendScript = mode === 'budgets' && scriptExists(SPEND_SCRIPT);
+  const saveScript = mode === 'savings' && scriptExists(SAVE_SCRIPT);
   w.url = spendScript
     ? `scriptable:///run/${encodeURIComponent(SPEND_SCRIPT)}`
+    : saveScript
+    ? `scriptable:///run/${encodeURIComponent(SAVE_SCRIPT)}`
     : api.APP_URL + { free: '#overview', coming: '#overview', savings: '#goals', budgets: '#budgets' }[mode];
   w.refreshAfterDate = new Date(Date.now() + REFRESH_MINUTES * 60 * 1000);
 
   if (loaded.signedOut) return messageWidget(w, family, 'Sign in needed', `Open Scriptable and run "${Script.name()}" to sign in.`);
   if (loaded.error) return messageWidget(w, family, loaded.error, 'Will try again shortly.');
 
-  const ctx = { ...loaded, spendScript };
+  const ctx = { ...loaded, spendScript, saveScript };
   ({ free: freeLayout, coming: comingLayout, savings: savingsLayout, budgets: budgetsLayout })[mode](w, family, ctx);
   return w;
 }

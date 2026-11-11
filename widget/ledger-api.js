@@ -200,6 +200,25 @@ async function addSpend(budgetId, amount, note) {
   return core.fromRow.spend(rows[0]);
 }
 
+// Logs money added to a goal today — straight from the current account, or paid straight out of it for a
+// straight-out goal — into wherever the goal's money usually goes (`accountId`, from `L.accountOf(goal)`, or
+// null for the current account). The same shapes the website's Move money sheet builds for "+ Add"/"+ Pay",
+// just this one simple case (one goal, one direction, the current account on the other side), through the
+// same all-or-nothing `move_money` function (migration 007) so a deposit and its transfer never save apart.
+async function addDeposit(goal, accountId, amount, note) {
+  const today = core.toISODate(core.startOfToday());
+  const transfers = accountId ? [{
+    key: accountId, account_id: accountId, moved_on: today, note: null, due_date: null,
+    amount: goal.straightOut ? -amount : amount, external: goal.straightOut
+  }] : [];
+  const entries = [{
+    goal_id: goal.id, amount, note: note || null, external: false, paid_out: false,
+    account_id: accountId || null, transfer_key: accountId || null, created_at: null
+  }];
+  const made = await call('POST', 'rpc/move_money', { p_transfers: transfers, p_entries: entries });
+  return core.fromRow.deposit(made.deposits[0]);
+}
+
 module.exports = {
-  APP_URL, AuthError, isSignedIn, signIn, signOut, loadLedger, addSpend,
+  APP_URL, AuthError, isSignedIn, signIn, signOut, loadLedger, addSpend, addDeposit,
 };

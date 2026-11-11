@@ -35,11 +35,19 @@ There's no build step. GitHub Pages serves the files as they are.
   how much should be put by today so each is covered on its due date. The app doesn't track the pot's real
   balance, and the bank balance forecast still takes each bill out on its due date.
   The rules are in `yearlyBillsPot()` in `ledger-core.js`.
-- **Goals** have either a target date (the app works out the monthly amount) or a fixed monthly amount.
-  The target is optional: a goal without one is open-ended and asks for its monthly amount every month.
-  A £0 deposit marks a month as skipped. Each goal shows a projection: ahead of or behind a steady pace for
-  dated goals, or an estimated finish month for the others. A monthly amount can have a day of the month, which
-  puts it in "Coming up" with a "Done" button.
+- **Goals** have either a target date (the app works out the monthly amount), a fixed monthly amount, or reset
+  on a cycle. The target is optional: a goal without one is open-ended and asks for its monthly amount every
+  month. A £0 deposit marks a month as skipped. Each goal shows a projection: ahead of or behind a steady pace
+  for dated goals, or an estimated finish month for the others; a goal behind schedule for 3 pay periods running
+  is called out as chronic, not just behind today. A monthly amount can have a day of the month, which puts it
+  in "Coming up" with a "Done" button.
+  - A goal that **resets on a cycle** (monthly, every 3 months, or yearly, from a date you set) is for an
+    allowance that renews rather than a one-off target — e.g. a mortgage's yearly overpayment limit. The target
+    amount becomes what's allowed each cycle; unused room doesn't carry over. It's never "done", has no pacing
+    advice (skip/schedule), and its card shows what's used this cycle and when it next resets, not a lifetime
+    total — its lifetime `saved` keeps climbing past the allowance every cycle, so it's left out of the
+    Overview's and Goals tab's lifetime "saved across all goals" figures (and the "Savings over time" chart,
+    when there's no savings account) for the same reason. The rules are in `goalAllowance()` in `ledger-core.js`.
   - Each goal entry records **where its money is kept**: a savings account, or the current account. So one goal's
     money can sit in several accounts, and each account knows how much of its balance belongs to each goal.
   - **Pay out** spends a goal's money: it leaves the account for good. It lowers what the goal *holds* but not
@@ -77,7 +85,9 @@ There's no build step. GitHub Pages serves the files as they are.
   beyond that. Money that was already in the account only counts towards a goal once it's assigned. Goals with
   no account (and straight-out goals paid from the current account) are one "Goals" row.
   The Savings card lists each account's balance, how much of it is for goals and how much is unassigned.
-  The charts and past pay are in a History section at the bottom, closed to start with.
+  The charts and past pay are in a History section at the bottom, closed to start with — including, once there's
+  a savings account, a combined "Net worth over time" chart (current account plus savings, the history behind
+  the "Total" figure on the Savings card).
 - **Bank balance.** You enter your current account balance by hand (a second update on the same day replaces
   that day's). The Overview carries it forward to the day before payday: bills still to come out, income still to
   come in, savings still to move this month (standing orders on their dates), and what's left in budgets
@@ -175,7 +185,7 @@ The app is mostly used in Safari on an iPhone. Two things to keep when editing t
 
 ## Phone widgets
 
-Four files go into Scriptable, each saved under the name shown (in Scriptable: **+**, paste, then rename at the top):
+Five files go into Scriptable, each saved under the name shown (in Scriptable: **+**, paste, then rename at the top):
 
 | Scriptable name | File | What it is |
 |---|---|---|
@@ -183,6 +193,7 @@ Four files go into Scriptable, each saved under the name shown (in Scriptable: *
 | `ledger-api` | `widget/ledger-api.js` | Sign-in and loading data. The session is kept in the iOS keychain, never the password. |
 | `Ledger Widget` | `widget/ledger-widget.js` | The widget. |
 | `Ledger Spend` | `widget/ledger-spend.js` | Logs a spend against a budget. |
+| `Ledger Save` | `widget/ledger-save.js` | Logs money added to a goal. |
 
 Run **Ledger Widget** once in Scriptable to sign in with the website's email and password. Then add a Scriptable
 widget to the Home Screen or Lock Screen, choose **Ledger Widget**, and set its **Parameter**:
@@ -191,6 +202,7 @@ widget to the Home Screen or Lock Screen, choose **Ledger Widget**, and set its 
   pay period sums; large adds what's coming up.
 - `coming`: bills and standing orders still to go out this pay period, with overdue ones in red.
 - `savings`: total savings, each account's balance with its unassigned money or maturity warning, and goal progress.
+  Tapping it opens **Ledger Save**.
 - `budgets`: money left in each budget, against an even pace. Tapping it opens **Ledger Spend**.
 
 Every mode works in the small, medium and large sizes and the three Lock Screen sizes. Widgets refresh when iOS
@@ -198,6 +210,11 @@ allows, roughly every 15–30 minutes, and show the last copy (marked "Offline")
 
 **Ledger Spend** asks which budget and how much, then logs it dated today. Run it from the budgets widget, from Siri
 ("Ledger Spend"), from a Home Screen icon (the script's ⓘ → Add to Home Screen), or from a Shortcut on the Action Button.
+
+**Ledger Save** asks which goal and how much, then logs it dated today — the same as "+ Add" (or "+ Pay", for a
+straight-out goal) on the website, into wherever the goal's money usually goes. Run it from the savings widget, from
+Siri ("Ledger Save"), from a Home Screen icon (the script's ⓘ → Add to Home Screen), or from a Shortcut on the Action
+Button.
 
 The widget's sums come from `ledger()` in `ledger-core.js`, which the Overview uses too, so the two always agree.
 

@@ -188,6 +188,20 @@
     return hasTarget(g) && g.saved >= g.target;
   }
 
+  // The cycle a periodic-reset goal (one with `resetFrequency`) is in right now: from its most recent reset
+  // date up to (not including) the next one. Shaped like a bill's schedule so the usual occurrence rules apply.
+  // Null for a goal that doesn't reset.
+  function goalCycle(goal, today) {
+    if (!goal.resetFrequency) return null;
+    const schedule = { frequency: goal.resetFrequency, startDate: goal.resetStart };
+    let start = parseLocalDate(goal.resetStart), end = null;
+    for (const d of occurrencesFrom(schedule, start)) {
+      if (d > today) { end = d; break; }
+      start = d;
+    }
+    return { start, end };
+  }
+
   // The dates in [from, to] for a goal with a day of the month set, or [] without one.
   function goalDaysBetween(goal, from, to) {
     if (!goal.monthlyDay) return [];
@@ -425,7 +439,8 @@
       id: r.id, name: r.name, target: r.target == null ? 0 : Number(r.target), saved: Number(r.saved), category: r.category || '',
       targetDate: r.target_date || null, monthlyAmount: num(r.monthly_amount),
       sortOrder: r.sort_order == null ? 0 : Number(r.sort_order), archived: !!r.archived,
-      accountId: r.account_id || null, straightOut: !!r.straight_out, monthlyDay: num(r.monthly_day), createdAt: r.created_at
+      accountId: r.account_id || null, straightOut: !!r.straight_out, monthlyDay: num(r.monthly_day), createdAt: r.created_at,
+      resetFrequency: r.reset_frequency || null, resetStart: r.reset_start || null
     }),
     deposit: r => ({
       id: r.id, goalId: r.goal_id, amount: Number(r.amount), note: r.note || '', external: !!r.external,
@@ -499,6 +514,44 @@
       return !d.accountId;
     };
     L.goalPlan = goal => goalPlan(goal, data.deposits, L.fromIncome);
+
+    // What a periodic-reset goal (`resetFrequency` set) has used of its allowance this cycle, and when it next
+    // resets. Unused room never carries over — it isn't added to next cycle's allowance. `target` holds the
+    // allowance per cycle for this goal shape, so `goalPlan`/`hasTarget`/`isDone` (which work off the goal's
+    // lifetime `saved`) don't apply here; the Goals tab reads this instead. Null for a goal that doesn't reset.
+    L.goalAllowance = goal => {
+      const cycle = goalCycle(goal, startOfToday());
+      if (!cycle) return null;
+      const used = Math.max(0, data.deposits.filter(d => d.goalId === goal.id && !d.paidOut &&
+        new Date(d.createdAt) >= cycle.start && new Date(d.createdAt) < cycle.end)
+        .reduce((s, d) => s + d.amount, 0));
+      return { allowance: goal.target, used, left: Math.max(0, goal.target - used), over: used > goal.target, ...cycle };
+    };
+
+    // How many pay periods in a row, this one included, a dated goal has been behind the same steady line
+    // `projectGoal` checks against — so a goal that's merely behind today reads the same as one that's been
+    // quietly slipping for months, unless something also looks across periods. 0 if it isn't behind right now,
+    // or it has no deadline to be behind on. Capped at `maxBack` periods so a very old goal doesn't walk back
+    // forever.
+    L.goalBehindStreak = (goal, maxBack = 11) => {
+      if (!hasTarget(goal) || !goal.targetDate || !goal.createdAt) return 0;
+      const created = new Date(goal.createdAt);
+      const due = parseLocalDate(goal.targetDate);
+      if (due <= created) return 0;
+      const monthlyShare = goal.target / Math.max(1, (due - created) / AVG_MONTH_MS);
+      const threshold = Math.max(1, monthlyShare / 2);
+      let streak = 0;
+      for (let back = 0; back <= maxBack; back++) {
+        const start = payPeriodFor(startOfToday(), back).start;
+        if (start <= created) break; // the goal didn't exist yet at the start of this period
+        const savedAtStart = data.deposits.filter(d => d.goalId === goal.id && !d.paidOut && new Date(d.createdAt) < start)
+          .reduce((s, d) => s + d.amount, 0);
+        const expected = goal.target * Math.min(1, Math.max(0, (start - created) / (due - created)));
+        if (savedAtStart - expected < -threshold) streak++;
+        else break;
+      }
+      return streak;
+    };
 
     // What a budget has used this pay period. `committed` is what the Overview sets aside: the allowance, or more if overspent.
     L.budgetUse = budget => {

@@ -487,6 +487,7 @@
   /* Goal projections */
   .projection-line { font-size: 11px; color: var(--ink-soft); margin: -6px 0 10px; }
   .projection-line.behind { color: var(--danger); }
+  .projection-line.chronic { font-weight: 600; }
 
   /* Savings accounts */
   .account-lines { margin: 2px 0 8px; }
@@ -911,9 +912,26 @@
       <input id="goalNameInput" type="text" placeholder="e.g. New camera" maxlength="60">
     </div>
     <div class="field">
-      <label for="goalTargetInput">Target amount (optional)</label>
+      <label for="goalTargetInput" id="goalTargetLabel">Target amount (optional)</label>
       <input id="goalTargetInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
-      <div class="field-hint">Leave blank for a goal with no end, e.g. mortgage overpayments.</div>
+      <div class="field-hint" id="goalTargetHint">Leave blank for a goal with no end, e.g. a loan overpayment with no fixed deadline.</div>
+    </div>
+    <div class="field">
+      <label class="field-check"><input id="goalResetInput" type="checkbox"> Resets on a cycle</label>
+      <div class="field-hint">For an allowance that renews, like a mortgage's yearly overpayment limit — the amount above becomes what's allowed each cycle. Unused room doesn't carry over; it just comes back fresh at the next reset.</div>
+    </div>
+    <div class="field" id="goalResetFreqField" style="display:none;">
+      <label for="goalResetFreqInput">Resets every</label>
+      <select id="goalResetFreqInput">
+        <option value="monthly">Month</option>
+        <option value="quarterly">3 months</option>
+        <option value="yearly">Year</option>
+      </select>
+    </div>
+    <div class="field" id="goalResetStartField" style="display:none;">
+      <label for="goalResetStartInput">First reset date</label>
+      <input id="goalResetStartInput" type="date">
+      <div class="field-hint">Any date it resets on — it repeats from here.</div>
     </div>
     <div class="field">
       <label class="field-check"><input id="goalStraightInput" type="checkbox"> Money goes straight out</label>
@@ -1291,7 +1309,7 @@
     get accountEntries() { return accountEntries; }, get transfers() { return transfers; }
   });
   const {
-    paymentFor, firstUnpaid, unpaidBetween, payOn, goalPlan, budgetUse, liveGoals, liveBudgets, liveAccounts,
+    paymentFor, firstUnpaid, unpaidBetween, payOn, goalPlan, goalBehindStreak, goalAllowance, budgetUse, liveGoals, liveBudgets, liveAccounts,
     accountOf, accountInfo, standingBetween, standingDone, accountSaving, balanceOutlook, goalHeld, heldIn, heldTotal, paidOut
   } = L;
   const { hasTarget } = LedgerCore;
@@ -1688,8 +1706,10 @@
     }
 
     totalsEl.style.display = 'flex';
-    const totalSaved = live.reduce((s, g) => s + g.saved, 0);
-    const totalTarget = live.reduce((s, g) => s + g.target, 0);
+    // A periodic-reset goal's lifetime saved/target keep climbing past its allowance every cycle, so they'd
+    // skew this lifetime total rather than add anything meaningful to it.
+    const totalSaved = live.filter(g => !g.resetFrequency).reduce((s, g) => s + g.saved, 0);
+    const totalTarget = live.filter(g => !g.resetFrequency).reduce((s, g) => s + g.target, 0);
     totalsEl.innerHTML = `
       <div class="item">
         <div class="num">${formatMoney(totalSaved)}</div>
@@ -1710,15 +1730,24 @@
     }
 
     list.innerHTML = displayed.map(g => {
-      const pct = LedgerCore.pctOf(g);
-      const done = LedgerCore.isDone(g);
+      // A periodic-reset goal is scored against its own cycle, not a lifetime total — `saved`/`target` (and so
+      // isDone/pctOf) keep growing past the allowance every cycle, which would otherwise make it look "done"
+      // forever after the first time it's used in full.
+      const allowance = g.resetFrequency ? goalAllowance(g) : null;
+      const pct = allowance ? Math.min(100, (allowance.used / allowance.allowance) * 100) : LedgerCore.pctOf(g);
+      const done = allowance ? false : LedgerCore.isDone(g);
       const plan = goalPlan(g);
       const by = plan.dueLabel ? ` to hit this by ${plan.dueLabel}` : '';
       let suggestion = '';
       const held = goalHeld(g);
       const heldSum = [...held.values()].reduce((s, v) => s + v, 0);
       const out = paidOut(g);
-      if (plan.overdue) suggestion = `Target date passed — ${formatMoney(plan.remaining)} still needed`;
+      if (allowance) {
+        // Just a cap, not an obligation — say what's left and when it's back, never behind/ahead of a pace.
+        suggestion = allowance.over
+          ? `${formatMoney(allowance.used - allowance.allowance)} over this cycle's allowance`
+          : `${formatMoney(allowance.left)} left this cycle`;
+      } else if (plan.overdue) suggestion = `Target date passed — ${formatMoney(plan.remaining)} still needed`;
       else if (plan.skip && !done) suggestion = `Skipped this month · then ${formatMoney(plan.afterSkip)}/mo${by}`;
       else if (plan.planned > 0 && plan.savedThisPeriod >= plan.planned) suggestion = `✓ ${formatMoney(plan.savedThisPeriod)} ${g.straightOut ? 'paid' : 'saved'} this month${plan.dueLabel ? ` · on track for ${plan.dueLabel}` : ''}`;
       else if (plan.savedThisPeriod > 0 && plan.planned > 0) suggestion = `${formatMoney(plan.savedThisPeriod)} of ${formatMoney(plan.planned)} ${g.straightOut ? 'paid' : 'saved'} this month${by}`;
@@ -1726,9 +1755,12 @@
       if (Math.abs(plan.fromOutside) >= 0.005 && !plan.overdue) {
         suggestion += `${suggestion ? ' · ' : ''}${plan.fromOutside > 0 ? '+' : '−'}${formatMoney(Math.abs(plan.fromOutside))} this month not from pay`;
       }
-      const suggestionHtml = suggestion ? `<div class="suggestion-line ${plan.overdue ? 'overdue' : ''}">${suggestion}</div>` : '';
-      const projectionHtml = plan.projection
-        ? `<div class="projection-line ${plan.projection.tone === 'behind' ? 'behind' : ''}">${plan.projection.text}</div>` : '';
+      const suggestionHtml = suggestion ? `<div class="suggestion-line ${!allowance && plan.overdue ? 'overdue' : ''}">${suggestion}</div>` : '';
+      // A goal that's merely behind today reads the same as one that's been slipping for months unless we
+      // also say so — 3 pay periods running (this one included) is called out as "chronic".
+      const streak = !allowance && plan.projection && plan.projection.tone === 'behind' ? goalBehindStreak(g) : 0;
+      const projectionHtml = !allowance && plan.projection
+        ? `<div class="projection-line ${plan.projection.tone === 'behind' ? 'behind' : ''} ${streak >= 3 ? 'chronic' : ''}">${plan.projection.text}${streak >= 3 ? ` · ${streak} periods running` : ''}</div>` : '';
       // Where its money is now, and what's been spent. Only worth saying when it isn't simply "all of it, in its
       // usual account".
       const heldParts = [...held.entries()].sort((x, y) => y[1] - x[1])
@@ -1736,7 +1768,9 @@
       const plainHeld = held.size === 1 && !out && (held.keys().next().value || null) === (g.accountId || null);
       const heldHtml = !g.straightOut && (out > 0.005 || (held.size && !plainHeld))
         ? `<div class="held-line">${[...heldParts, out > 0.005 ? `${formatMoney(out)} paid out` : ''].filter(Boolean).join(' · ')}</div>` : '';
-      const amountsHtml = hasTarget(g)
+      const amountsHtml = allowance
+        ? `<span class="saved">${formatMoney(allowance.used)}</span> of ${formatMoney(allowance.allowance)} this cycle · resets ${shortDate(allowance.end)}`
+        : hasTarget(g)
         ? `<span class="saved">${formatMoney(g.saved)}</span> of ${formatMoney(g.target)} · ${pct.toFixed(0)}%`
         : `<span class="saved">${formatMoney(g.saved)}</span> ${g.straightOut ? 'paid' : 'saved'} · no target`;
       const canPayOut = !g.straightOut && heldSum > 0.005;
@@ -1747,8 +1781,10 @@
         : `<button class="btn-small archive-goal" data-id="${g.id}">Archive</button>`;
       else mainBtn = `${canPayOut ? `<button class="btn-small pay-out" data-id="${g.id}">Pay out</button>` : ''}<button class="btn-small add-deposit" data-id="${g.id}">+ Add</button>`;
       let skipBtnHtml = '';
-      if (plan.skip) skipBtnHtml = `<button class="btn-small unskip-goal" data-id="${plan.skip.id}">Unskip</button>`;
-      else if (plan.planned > 0 && plan.savedThisPeriod < plan.planned) skipBtnHtml = `<button class="btn-small skip-goal" data-id="${g.id}">Skip month</button>`;
+      if (!allowance) {
+        if (plan.skip) skipBtnHtml = `<button class="btn-small unskip-goal" data-id="${plan.skip.id}">Unskip</button>`;
+        else if (plan.planned > 0 && plan.savedThisPeriod < plan.planned) skipBtnHtml = `<button class="btn-small skip-goal" data-id="${g.id}">Skip month</button>`;
+      }
       const handleHtml = displayed.length > 1
         ? `<button class="drag-handle" data-id="${g.id}" aria-label="Reorder ${escapeHtml(g.name)} — drag, or use the arrow keys">⠿</button>` : '';
       return `
@@ -1759,7 +1795,7 @@
               <button class="btn-icon edit-goal" data-id="${g.id}">edit</button>
             </div>
           </div>
-          ${g.category || accountOf(g) || g.straightOut ? `<div class="badge-category">${[g.category, g.straightOut ? 'paid straight out' : '', accountOf(g) && (g.straightOut ? `from ${accountOf(g).name}` : accountOf(g).name)].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
+          ${g.category || accountOf(g) || g.straightOut || g.resetFrequency ? `<div class="badge-category">${[g.category, g.straightOut ? 'paid straight out' : '', accountOf(g) && (g.straightOut ? `from ${accountOf(g).name}` : accountOf(g).name), g.resetFrequency ? `resets ${{ monthly: 'monthly', quarterly: 'every 3 months', yearly: 'yearly' }[g.resetFrequency]}` : ''].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
           ${hasTarget(g) ? `<div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>` : ''}
           ${suggestionHtml}
           ${projectionHtml}
@@ -2485,15 +2521,27 @@
 
   const goalStraightInput = document.getElementById('goalStraightInput');
   const goalDayInput = document.getElementById('goalDayInput');
+  const goalResetInput = document.getElementById('goalResetInput');
+  const goalResetFreqInput = document.getElementById('goalResetFreqInput');
+  const goalResetStartInput = document.getElementById('goalResetStartInput');
 
   // A target date sets the monthly amount itself, so the manual one only shows without a date. A date needs a
-  // target, so it hides when there's none. The day of the month goes with a monthly amount.
+  // target, so it hides when there's none. The day of the month goes with a monthly amount. "Resets on a cycle"
+  // is a third, mutually exclusive shape: it hides the date/monthly/day fields and repurposes the target amount
+  // as the allowance per cycle.
   function syncGoalMonthlyField() {
-    const hasDate = goalDateInput.value || hasBadDate(goalDateInput);
+    const resetOn = goalResetInput.checked;
+    const hasDate = !resetOn && (goalDateInput.value || hasBadDate(goalDateInput));
     const hasTargetValue = parseFloat(goalTargetInput.value) > 0;
-    document.getElementById('goalDateField').style.display = hasTargetValue || hasDate ? 'block' : 'none';
-    document.getElementById('goalMonthlyField').style.display = hasDate ? 'none' : 'block';
-    document.getElementById('goalDayField').style.display = !hasDate && goalMonthlyInput.value ? 'block' : 'none';
+    document.getElementById('goalResetFreqField').style.display = resetOn ? 'block' : 'none';
+    document.getElementById('goalResetStartField').style.display = resetOn ? 'block' : 'none';
+    document.getElementById('goalDateField').style.display = !resetOn && (hasTargetValue || hasDate) ? 'block' : 'none';
+    document.getElementById('goalMonthlyField').style.display = resetOn || hasDate ? 'none' : 'block';
+    document.getElementById('goalDayField').style.display = !resetOn && !hasDate && goalMonthlyInput.value ? 'block' : 'none';
+    document.getElementById('goalTargetLabel').textContent = resetOn ? 'Allowance per cycle' : 'Target amount (optional)';
+    document.getElementById('goalTargetHint').textContent = resetOn
+      ? "What can go in before it resets — unused room doesn't carry over."
+      : 'Leave blank for a goal with no end, e.g. a loan overpayment with no fixed deadline.';
     const straight = goalStraightInput.checked;
     document.getElementById('goalAccountLabel').textContent = straight ? 'Usually paid from' : 'Usually kept in';
     document.getElementById('goalAccountHint').textContent = straight
@@ -2501,8 +2549,8 @@
       : 'Where adding to this goal moves money to, unless you pick another account.';
     document.querySelector('#goalAccountInput option[value=""]').textContent = straight ? 'Current account' : 'Current account (not moved)';
   }
-  [goalDateInput, goalTargetInput, goalMonthlyInput].forEach(i => i.addEventListener('input', syncGoalMonthlyField));
-  goalStraightInput.addEventListener('change', syncGoalMonthlyField);
+  [goalDateInput, goalTargetInput, goalMonthlyInput, goalResetStartInput].forEach(i => i.addEventListener('input', syncGoalMonthlyField));
+  [goalStraightInput, goalResetInput, goalResetFreqInput].forEach(i => i.addEventListener('change', syncGoalMonthlyField));
 
   // Lists the live savings accounts (plus the goal's own, if it's been archived since). Hidden when there are none.
   function fillGoalAccountSelect(goal) {
@@ -2528,6 +2576,9 @@
       goalMonthlyInput.value = g.monthlyAmount || '';
       goalStraightInput.checked = g.straightOut;
       goalDayInput.value = g.monthlyDay || '';
+      goalResetInput.checked = !!g.resetFrequency;
+      goalResetFreqInput.value = g.resetFrequency || 'yearly';
+      goalResetStartInput.value = g.resetStart || '';
       deleteGoalRow.style.display = 'flex';
     } else {
       goalSheetTitle.textContent = 'New goal';
@@ -2538,6 +2589,9 @@
       goalMonthlyInput.value = '';
       goalStraightInput.checked = false;
       goalDayInput.value = '';
+      goalResetInput.checked = false;
+      goalResetFreqInput.value = 'yearly';
+      goalResetStartInput.value = '';
       deleteGoalRow.style.display = 'none';
     }
     syncGoalMonthlyField();
@@ -2559,22 +2613,28 @@
     const targetRaw = goalTargetInput.value.trim();
     const target = targetRaw ? parseFloat(targetRaw) : null;
     const category = goalCategoryInput.value.trim();
-    const targetDate = goalDateInput.value || null;
+    const resetOn = goalResetInput.checked;
+    const targetDate = resetOn ? null : (goalDateInput.value || null);
     if (!name) { showToast('Give the goal a name'); return; }
     if (target !== null && !(target > 0)) { showToast('Enter a target above £0, or leave it blank'); return; }
-    if (hasBadDate(goalDateInput)) { showToast("That target date doesn't exist"); return; }
+    if (!resetOn && hasBadDate(goalDateInput)) { showToast("That target date doesn't exist"); return; }
     if (targetDate && !target) { showToast('A target date needs a target amount'); return; }
     const monthlyRaw = goalMonthlyInput.value.trim();
-    const monthlyAmount = targetDate || !monthlyRaw ? null : parseFloat(monthlyRaw);
+    const monthlyAmount = resetOn || targetDate || !monthlyRaw ? null : parseFloat(monthlyRaw);
     if (monthlyAmount !== null && !(monthlyAmount > 0)) { showToast('Enter a monthly amount above £0'); return; }
     const dayRaw = goalDayInput.value.trim();
-    const monthlyDay = monthlyAmount && dayRaw ? parseInt(dayRaw, 10) : null;
+    const monthlyDay = !resetOn && monthlyAmount && dayRaw ? parseInt(dayRaw, 10) : null;
     if (monthlyDay !== null && !(monthlyDay >= 1 && monthlyDay <= 31)) { showToast('Enter a day from 1 to 31, or leave it blank'); return; }
+    const resetFrequency = resetOn ? goalResetFreqInput.value : null;
+    const resetStart = resetOn ? (goalResetStartInput.value || null) : null;
+    if (resetOn && !(target > 0)) { showToast('Enter the allowance for each cycle'); return; }
+    if (resetOn && (!resetStart || hasBadDate(goalResetStartInput))) { showToast('Enter the first reset date'); return; }
 
     const accountId = document.getElementById('goalAccountInput').value || null;
     const fields = {
       name, target, category: category || null, target_date: targetDate, monthly_amount: monthlyAmount,
-      straight_out: goalStraightInput.checked, monthly_day: monthlyDay
+      straight_out: goalStraightInput.checked, monthly_day: monthlyDay,
+      reset_frequency: resetFrequency, reset_start: resetStart
     };
     if (accountsReady) fields.account_id = accountId;
 
@@ -3554,8 +3614,11 @@
     // ---------- Headline stats ----------
     const daysLeft = sum.daysLeft;
     const live = liveGoals();
-    const totalSaved = live.reduce((s, g) => s + g.saved, 0);
-    const totalTarget = live.reduce((s, g) => s + g.target, 0);
+    // A periodic-reset goal's lifetime saved/target keep climbing past its allowance every cycle, so they're
+    // left out of this lifetime total (and the "Savings over time" chart below, which shares the same figures)
+    // rather than skew it; its own card shows this cycle's progress instead.
+    const totalSaved = live.filter(g => !g.resetFrequency).reduce((s, g) => s + g.saved, 0);
+    const totalTarget = live.filter(g => !g.resetFrequency).reduce((s, g) => s + g.target, 0);
     const accountInfos = sum.accounts.map(x => ({ a: x.account, info: x.info }));
     const savingsTotal = accountInfos.reduce((s, x) => s + x.info.balance, 0);
     const inGoalsTotal = accountInfos.reduce((s, x) => s + x.info.inGoals, 0);
@@ -3654,11 +3717,16 @@
         const spare = Math.floor(fc.low);
         const open = liveGoals().filter(g => !LedgerCore.isDone(g));
         if (spare >= 10 && open.length) {
-          const behind = open.map(g => ({ g, p: goalPlan(g).projection })).find(x => x.p && x.p.behindBy);
+          // Among behind goals, the one that's been slipping longest comes first, not just whichever is first
+          // in the list — a goal quietly behind for months is worth surfacing over one that's only just behind.
+          const behind = open.map(g => ({ g, p: goalPlan(g).projection }))
+            .filter(x => x.p && x.p.behindBy)
+            .map(x => ({ ...x, streak: goalBehindStreak(x.g) }))
+            .sort((a, b) => b.streak - a.streak)[0];
           const g = behind ? behind.g : open[0];
           const amount = Math.max(1, Math.floor(Math.min(spare, behind ? behind.p.behindBy : hasTarget(g) ? g.target - g.saved : spare)));
           const why = behind
-            ? `${escapeHtml(g.name)} is ${formatMoney(behind.p.behindBy)} behind schedule.`
+            ? `${escapeHtml(g.name)} is ${formatMoney(behind.p.behindBy)} behind schedule${behind.streak >= 3 ? ` · ${behind.streak} periods running` : ''}.`
             : `You could put it towards ${escapeHtml(g.name)}.`;
           html += `
             <div class="statement-row">
@@ -3882,7 +3950,7 @@
 
     // ---------- Savings over time ----------
     // Running total across current goals. Anything saved before deposits were recorded is the starting point.
-    const liveIds = new Set(live.map(g => g.id));
+    const liveIds = new Set(live.filter(g => !g.resetFrequency).map(g => g.id));
     const goalDeposits = allDeposits.filter(d => d.amount !== 0 && !d.paidOut && liveIds.has(d.goalId))
       .sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
     const goalName = new Map(live.map(g => [g.id, g.name]));
@@ -3921,6 +3989,32 @@
     if (balancePoints.length >= 2) {
       html += `<h3 class="section-title">Balance over time <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">as entered</span></h3>
         <div class="statement chart-box"><div class="chart" id="balanceChart"></div></div>`;
+    }
+
+    // ---------- Net worth over time ----------
+    // Current account balance plus savings accounts, combined — the history behind the "Total" stat above.
+    // Only shown once there's a real savings account: without one, a goal's money kept in the current account
+    // is already part of the balance, so adding `savingsPoints` again here would double it up.
+    let netWorthPoints = [];
+    if (accountInfos.length && balancePoints.length && savingsPoints.length) {
+      const valueAt = (points, t) => {
+        let v = null;
+        for (const p of points) { if (p.x <= t) v = p.y; else break; }
+        return v;
+      };
+      const times = [...new Set([...balancePoints, ...savingsPoints].map(p => +p.x))].sort((a, b) => a - b).map(t => new Date(t));
+      netWorthPoints = times.map(t => {
+        const bal = valueAt(balancePoints, t), sav = valueAt(savingsPoints, t);
+        if (bal == null || sav == null) return null; // not enough history yet on one side
+        return { x: t, y: bal + sav, tip: `<div class="tip-title">${formatDate(t)}</div>
+          <div class="tip-row"><span>Current account</span><b>${formatMoney(bal)}</b></div>
+          <div class="tip-row"><span>Savings</span><b>${formatMoney(sav)}</b></div>
+          <div class="tip-row"><span>Total</span><b>${formatMoney(bal + sav)}</b></div>` };
+      }).filter(Boolean);
+    }
+    if (netWorthPoints.length >= 2) {
+      html += `<h3 class="section-title">Net worth over time <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">current account plus savings</span></h3>
+        <div class="statement chart-box"><div class="chart" id="netWorthChart"></div></div>`;
     }
 
     // ---------- Previous pay ----------
@@ -3978,6 +4072,12 @@
       mountChart(document.getElementById('balanceChart'), {
         kind: 'line', points: balancePoints, height: 140,
         label: `Bank balance as entered over time, last ${formatMoney(latestBalance.amount)}`
+      });
+    }
+    if (chartsShown && netWorthPoints.length >= 2) {
+      mountChart(document.getElementById('netWorthChart'), {
+        kind: 'line', points: netWorthPoints, height: 150,
+        label: `Current account plus savings over time, now ${formatMoney(netWorthPoints[netWorthPoints.length - 1].y)}`
       });
     }
     if (chartsShown && payHistory.length >= 2) {
