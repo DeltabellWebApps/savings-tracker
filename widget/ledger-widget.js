@@ -313,7 +313,7 @@ function accountNote(a, info, L) {
 function goalLine(L, g) {
   const p = L.goalPlan(g);
   if (p.overdue) return `Target date passed · ${money(p.remaining)} to go`;
-  if (p.skip && !isDone(g)) return 'Skipped this month';
+  if (p.skip && (g.resetFrequency || !isDone(g))) return 'Skipped this month';
   if (p.planned > 0 && p.savedThisPeriod >= p.planned) return `✓ ${money(p.savedThisPeriod)} saved this month`;
   if (p.projection) {
     // Same "chronic" callout as the website: behind for 3 pay periods running (this one included), not just today.

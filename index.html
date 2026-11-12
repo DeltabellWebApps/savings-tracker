@@ -973,7 +973,7 @@
     <div class="field" id="goalMonthlyField">
       <label for="goalMonthlyInput">Monthly amount (optional)</label>
       <input id="goalMonthlyInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
-      <div class="field-hint">No deadline? Set how much to put in each month and it'll count in your totals.</div>
+      <div class="field-hint" id="goalMonthlyHint">No deadline? Set how much to put in each month and it'll count in your totals.</div>
     </div>
     <div class="field" id="goalDayField">
       <label for="goalDayInput">Day of the month (optional)</label>
@@ -1769,10 +1769,18 @@
       const heldSum = [...held.values()].reduce((s, v) => s + v, 0);
       const out = paidOut(g);
       if (allowance) {
-        // Just a cap, not an obligation — say what's left and when it's back, never behind/ahead of a pace.
-        suggestion = allowance.over
+        // A cap, not a deadline — say what's left and when it's back, never behind/ahead of a pace. An optional
+        // monthly amount reads like any other goal's (capped by goalPlan at the room left this cycle).
+        const verb = g.straightOut ? 'paid' : 'saved';
+        let monthly = '';
+        if (plan.skip) monthly = 'Skipped this month';
+        else if (plan.planned > 0 && plan.savedThisPeriod >= plan.planned) monthly = `✓ ${formatMoney(plan.savedThisPeriod)} ${verb} this month`;
+        else if (plan.planned > 0 && plan.savedThisPeriod > 0) monthly = `${formatMoney(plan.savedThisPeriod)} of ${formatMoney(plan.planned)} ${verb} this month`;
+        else if (plan.planned > 0) monthly = `${g.straightOut ? 'Pay' : 'Save'} ${formatMoney(plan.planned)}/mo${g.monthlyDay ? ` · due on the ${ordinal(g.monthlyDay)}` : ''}`;
+        const room = allowance.over
           ? `${formatMoney(allowance.used - allowance.allowance)} over this cycle's allowance`
           : `${formatMoney(allowance.left)} left this cycle`;
+        suggestion = [monthly, room].filter(Boolean).join(' · ');
       } else if (plan.overdue) suggestion = `Target date passed — ${formatMoney(plan.remaining)} still needed`;
       else if (plan.skip && !done) suggestion = `Skipped this month · then ${formatMoney(plan.afterSkip)}/mo${by}`;
       else if (plan.planned > 0 && plan.savedThisPeriod >= plan.planned) suggestion = `✓ ${formatMoney(plan.savedThisPeriod)} ${g.straightOut ? 'paid' : 'saved'} this month${plan.dueLabel ? ` · on track for ${plan.dueLabel}` : ''}`;
@@ -1811,10 +1819,8 @@
         : `<button class="btn-small archive-goal" data-id="${g.id}">Archive</button>`;
       else mainBtn = `${canPayOut ? `<button class="btn-small pay-out" data-id="${g.id}">Pay out</button>` : ''}<button class="btn-small add-deposit" data-id="${g.id}">+ Add</button>`;
       let skipBtnHtml = '';
-      if (!allowance) {
-        if (plan.skip) skipBtnHtml = `<button class="btn-small unskip-goal" data-id="${plan.skip.id}">Unskip</button>`;
-        else if (plan.planned > 0 && plan.savedThisPeriod < plan.planned) skipBtnHtml = `<button class="btn-small skip-goal" data-id="${g.id}">Skip month</button>`;
-      }
+      if (plan.skip) skipBtnHtml = `<button class="btn-small unskip-goal" data-id="${plan.skip.id}">Unskip</button>`;
+      else if (plan.planned > 0 && plan.savedThisPeriod < plan.planned) skipBtnHtml = `<button class="btn-small skip-goal" data-id="${g.id}">Skip month</button>`;
       const catchUpBtnHtml = catchUp > 0
         ? `<button class="btn-small catch-up-goal" data-id="${g.id}" data-amount="${catchUp}">Catch up ${formatMoney(catchUp)}</button>` : '';
       const handleHtml = displayed.length > 1
@@ -2567,8 +2573,8 @@
 
   // A target date sets the monthly amount itself, so the manual one only shows without a date. A date needs a
   // target, so it hides when there's none. The day of the month goes with a monthly amount. "Resets on a cycle"
-  // is a third, mutually exclusive shape: it hides the date/monthly/day fields and repurposes the target amount
-  // as the allowance per cycle.
+  // is a third shape: it hides the target date (the reset is its own deadline) and repurposes the target amount
+  // as the allowance per cycle. It can still have a monthly amount and day.
   function syncGoalMonthlyField() {
     const resetOn = goalResetInput.checked;
     const hasDate = !resetOn && (goalDateInput.value || hasBadDate(goalDateInput));
@@ -2576,8 +2582,12 @@
     document.getElementById('goalResetFreqField').style.display = resetOn ? 'block' : 'none';
     document.getElementById('goalResetStartField').style.display = resetOn ? 'block' : 'none';
     document.getElementById('goalDateField').style.display = !resetOn && (hasTargetValue || hasDate) ? 'block' : 'none';
-    document.getElementById('goalMonthlyField').style.display = resetOn || hasDate ? 'none' : 'block';
-    document.getElementById('goalDayField').style.display = !resetOn && !hasDate && goalMonthlyInput.value ? 'block' : 'none';
+    document.getElementById('goalMonthlyField').style.display = hasDate ? 'none' : 'block';
+    document.getElementById('goalDayField').style.display = !hasDate && goalMonthlyInput.value ? 'block' : 'none';
+    const perMonth = hasTargetValue ? parseFloat(goalTargetInput.value) * LedgerCore.PER_MONTH[goalResetFreqInput.value] : 0;
+    document.getElementById('goalMonthlyHint').textContent = resetOn
+      ? `Optional. Set it and it counts in your totals each month, stopping once this cycle's allowance is used.${perMonth ? ` Using it all takes ${formatMoney(perMonth)}/mo.` : ''}`
+      : "No deadline? Set how much to put in each month and it'll count in your totals.";
     document.getElementById('goalTargetLabel').textContent = resetOn ? 'Allowance per cycle' : 'Target amount (optional)';
     document.getElementById('goalTargetHint').textContent = resetOn
       ? "What can go in before it resets — unused room doesn't carry over."
@@ -2660,10 +2670,10 @@
     if (!resetOn && hasBadDate(goalDateInput)) { showToast("That target date doesn't exist"); return; }
     if (targetDate && !target) { showToast('A target date needs a target amount'); return; }
     const monthlyRaw = goalMonthlyInput.value.trim();
-    const monthlyAmount = resetOn || targetDate || !monthlyRaw ? null : parseFloat(monthlyRaw);
+    const monthlyAmount = targetDate || !monthlyRaw ? null : parseFloat(monthlyRaw);
     if (monthlyAmount !== null && !(monthlyAmount > 0)) { showToast('Enter a monthly amount above £0'); return; }
     const dayRaw = goalDayInput.value.trim();
-    const monthlyDay = !resetOn && monthlyAmount && dayRaw ? parseInt(dayRaw, 10) : null;
+    const monthlyDay = monthlyAmount && dayRaw ? parseInt(dayRaw, 10) : null;
     if (monthlyDay !== null && !(monthlyDay >= 1 && monthlyDay <= 31)) { showToast('Enter a day from 1 to 31, or leave it blank'); return; }
     const resetFrequency = resetOn ? goalResetFreqInput.value : null;
     const resetStart = resetOn ? (goalResetStartInput.value || null) : null;

@@ -191,15 +191,20 @@
   // The cycle a periodic-reset goal (one with `resetFrequency`) is in right now: from its most recent reset
   // date up to (not including) the next one. Shaped like a bill's schedule so the usual occurrence rules apply.
   // Null for a goal that doesn't reset.
+  // The reset date may be any one it resets on, past or future (e.g. next 31 Mar), so this steps back from it
+  // as well as forwards: `n` counts resets from `resetStart`, negative for the ones before it.
+  function goalCycleIndex(goal, today) {
+    const s = parseLocalDate(goal.resetStart), f = goal.resetFrequency;
+    let n = 0;
+    while (occurrence(s, f, n) > today) n--;
+    while (occurrence(s, f, n + 1) <= today) n++;
+    return n;
+  }
+
   function goalCycle(goal, today) {
-    if (!goal.resetFrequency) return null;
-    const schedule = { frequency: goal.resetFrequency, startDate: goal.resetStart };
-    let start = parseLocalDate(goal.resetStart), end = null;
-    for (const d of occurrencesFrom(schedule, start)) {
-      if (d > today) { end = d; break; }
-      start = d;
-    }
-    return { start, end };
+    if (!goal.resetFrequency || !goal.resetStart) return null;
+    const s = parseLocalDate(goal.resetStart), n = goalCycleIndex(goal, today);
+    return { start: occurrence(s, goal.resetFrequency, n), end: occurrence(s, goal.resetFrequency, n + 1) };
   }
 
   // The dates in [from, to] for a goal with a day of the month set, or [] without one.
@@ -232,6 +237,23 @@
     const skip = mine.find(d => d.amount === 0 && !d.external) || null;
     const savedThisPeriod = mine.filter(d => !outside(d)).reduce((s, d) => s + d.amount, 0);
     const fromOutside = mine.filter(outside).reduce((s, d) => s + d.amount, 0);
+
+    // A periodic-reset goal's `target` is its allowance per cycle and its lifetime `saved` keeps climbing, so
+    // its optional monthly amount is capped by the room left in this cycle when the pay period began, not by
+    // target − saved. `remaining` is the room left in the cycle now. No deadline, so no projection.
+    if (goal.resetFrequency) {
+      const cycle = goalCycle(goal, startOfToday());
+      const inCycle = (deposits || []).filter(d => d.goalId === goal.id && !d.paidOut && cycle &&
+        new Date(d.createdAt) >= cycle.start && new Date(d.createdAt) < cycle.end);
+      const used = inCycle.reduce((s, d) => s + d.amount, 0);
+      const usedBefore = inCycle.filter(d => new Date(d.createdAt) < period.start).reduce((s, d) => s + d.amount, 0);
+      const planned = goal.monthlyAmount ? Math.min(goal.monthlyAmount, Math.max(0, goal.target - usedBefore)) : 0;
+      const committed = skip ? Math.max(0, savedThisPeriod) : Math.max(planned, savedThisPeriod);
+      return {
+        planned, savedThisPeriod, fromOutside, skip, remaining: Math.max(0, goal.target - used), overdue: false,
+        dueLabel: null, afterSkip: goal.monthlyAmount || 0, committed, projection: null
+      };
+    }
 
     if (!hasTarget(goal)) {
       const planned = goal.monthlyAmount || 0;
@@ -533,17 +555,14 @@
     // carried over, so there's nothing to add back. Every cycle uses today's allowance (`goal.target`), same as
     // budgets use today's allowance for past pay periods.
     L.goalAllowanceHistory = (goal, count = 6) => {
-      if (!goal.resetFrequency) return [];
+      if (!goal.resetFrequency || !goal.resetStart) return [];
       const today = startOfToday();
-      const schedule = { frequency: goal.resetFrequency, startDate: goal.resetStart };
-      const bounds = [];
-      for (const d of occurrencesFrom(schedule, parseLocalDate(goal.resetStart))) {
-        bounds.push(d);
-        if (d > today) break;
-      }
+      const s = parseLocalDate(goal.resetStart), f = goal.resetFrequency;
+      const n = goalCycleIndex(goal, today);
       const cycles = [];
-      for (let i = Math.max(0, bounds.length - 1 - count); i < bounds.length - 1; i++) {
-        const start = bounds[i], end = bounds[i + 1];
+      // Back no further than the reset date itself, unless that's still to come (then just this cycle).
+      for (let i = Math.max(Math.min(0, n), n - count + 1); i <= n; i++) {
+        const start = occurrence(s, f, i), end = occurrence(s, f, i + 1);
         const used = Math.max(0, data.deposits.filter(d => d.goalId === goal.id && !d.paidOut &&
           new Date(d.createdAt) >= start && new Date(d.createdAt) < end)
           .reduce((s, d) => s + d.amount, 0));
