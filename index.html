@@ -1387,8 +1387,16 @@
   let billAmountHistory = []; // a bill's past amounts, oldest first, recorded whenever its amount is edited
   let billHistoryReady = false; // false until migration 009 has been run; price-change notes stay hidden until then
   const showArchived = { goals: false, bills: false, budgets: false, accounts: false };
-  const overviewFolds = new Set(); // which of the Overview's closed sections are open (bank balance, savings, pay period)
-  let showOverviewHistory = false; // the Overview's History section (charts and past pay) starts closed
+  // Which of the Overview's sections are open: bank balance, savings, pay period, and History (charts and past
+  // pay). All start closed; whatever you open or close is remembered on this device (`ledger.overviewOpen`).
+  const OVERVIEW_OPEN_KEY = 'ledger.overviewOpen';
+  const overviewFolds = new Set();
+  try { (JSON.parse(localStorage.getItem(OVERVIEW_OPEN_KEY)) || []).forEach(k => overviewFolds.add(k)); } catch (e) { /* storage blocked or bad value */ }
+  let showOverviewHistory = overviewFolds.has('history');
+  function saveOverviewOpen() {
+    if (showOverviewHistory) overviewFolds.add('history'); else overviewFolds.delete('history');
+    try { localStorage.setItem(OVERVIEW_OPEN_KEY, JSON.stringify([...overviewFolds])); } catch (e) { /* storage blocked */ }
+  }
   const RECAP_SEEN_KEY = 'ledger-recap-period-seen';
   let recapCard; // undefined until decided this session; null once decided there's nothing to show
   let recapDismissed = false;
@@ -4517,11 +4525,12 @@
     el.innerHTML = alertHtml + heroHtml + recapHtml + needsHtml + html;
     el.querySelectorAll('details.fold').forEach(d => d.addEventListener('toggle', () => {
       if (d.open) overviewFolds.add(d.dataset.fold); else overviewFolds.delete(d.dataset.fold);
+      saveOverviewOpen();
     }));
     const dismissRecap = document.getElementById('dismissRecap');
     if (dismissRecap) dismissRecap.addEventListener('click', () => { recapDismissed = true; renderOverview(); });
     const historyToggle = document.getElementById('overviewHistoryToggle');
-    if (historyToggle) historyToggle.addEventListener('click', () => { showOverviewHistory = !showOverviewHistory; renderOverview(); });
+    if (historyToggle) historyToggle.addEventListener('click', () => { showOverviewHistory = !showOverviewHistory; saveOverviewOpen(); renderOverview(); });
     el.querySelectorAll('.split-bar .seg').forEach(seg => {
       const show = () => {
         const r = seg.getBoundingClientRect();
