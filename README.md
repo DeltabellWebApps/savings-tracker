@@ -39,33 +39,41 @@ There's no build step. GitHub Pages serves the files as they are.
   how much should be put by today so each is covered on its due date. The app doesn't track the pot's real
   balance, and the bank balance forecast still takes each bill out on its due date.
   The rules are in `yearlyBillsPot()` in `ledger-core.js`.
-- **Goals** have either a target date (the app works out the monthly amount), a fixed monthly amount, or reset
-  on a cycle. The target is optional: a goal without one is open-ended and asks for its monthly amount every
-  month. A £0 deposit marks a month as skipped. Each goal shows a projection: ahead of or behind a steady pace
+- **Goals** come in three kinds, picked first on the goal form: **Save up** (money builds up for it), **Pay off**
+  (each payment goes straight out, see below) and **Allowance** (resets on a cycle, see below). Save up and Pay
+  off then pick a plan: by a target date (the app works out the monthly amount), a fixed amount a month, or none;
+  only the chosen one is saved. Category and account sit under "More options". The target is optional: a goal
+  without one is open-ended and asks for its monthly amount every month.
+  Each card shows a status label (behind, on track, skipped, ready…, from `goalStatus()` in `index.html`), one
+  line of figures and one main button; tapping the card opens the details and the other actions (Catch up, Skip
+  month, Pay out, History, Edit). A £0 deposit marks a month as skipped. Each goal shows a projection: ahead of or behind a steady pace
   for dated goals, or an estimated finish month for the others; a goal behind schedule for 3 pay periods running
   is called out as chronic, not just behind today. A dated goal that's behind schedule gets a "Catch up" button
   that opens "+ Add" pre-filled with exactly the gap to the steady-pace line (capped at what it still needs in
   total), so getting back on track is one tap plus confirming. A monthly amount can have a day of the month,
   which puts it in "Coming up" with a "Done" button.
-  - A goal that **resets on a cycle** (monthly, every 3 months, or yearly, from a date you set) is for an
-    allowance that renews rather than a one-off target — e.g. a mortgage's yearly overpayment limit. The target
-    amount becomes what's allowed each cycle; unused room doesn't carry over. It's never "done", has no pacing
-    advice (skip/schedule), and its card shows what's used this cycle and when it next resets, not a lifetime
-    total — its lifetime `saved` keeps climbing past the allowance every cycle, so it's left out of the
+  - An **allowance** goal resets on a cycle (monthly, every 3 months, or yearly, from any date it resets on, past
+    or future). It's for an allowance that renews rather than a one-off target — e.g. a mortgage's yearly
+    overpayment limit. The target amount becomes what's allowed each cycle; unused room doesn't carry over. It can
+    have a monthly amount (and day), with Skip month, capped at the room left in the cycle when the pay period
+    began; it has no target date, projection or Catch up. It's never "done", and its card shows what's used this
+    cycle, not a lifetime total — its lifetime `saved` keeps climbing past the allowance every cycle, so it's left out of the
     Overview's and Goals tab's lifetime "saved across all goals" figures (and the "Savings over time" chart,
     when there's no savings account) for the same reason. The rules are in `goalAllowance()` in `ledger-core.js`.
   - Each goal entry records **where its money is kept**: a savings account, or the current account. So one goal's
     money can sit in several accounts, and each account knows how much of its balance belongs to each goal.
   - **Pay out** spends a goal's money: it leaves the account for good. It lowers what the goal *holds* but not
     what it has *saved*, so a goal you've spent on stays complete (and can then be archived).
-  - A goal can be set to **money goes straight out** (e.g. mortgage or loan overpayments). Nothing is kept: each
+  - A **Pay off** goal (or an allowance with "Paid straight out" ticked) is for money that goes straight out,
+    e.g. mortgage or loan overpayments; in the database it's `straight_out`. Nothing is kept: each
     amount comes off the account it was paid from, and cashback counts as "from outside my income".
 - **Moving money.** One "Move money" form does every movement: from the current account, a savings account or
   outside your income, to a savings account, the current account or paid out, optionally split between goals.
   Money not given to a goal stays *unassigned*. "+ Add" and "Pay out" on a goal, "Assign" and "Done" on an
   account all open it filled in. The rules for what it records are in the comment above `openMoveSheet()` in
   `index.html`.
-- **Savings accounts** (regular saver, cash ISA, other) are listed at the top of the Goals tab, with what each
+- **Savings accounts** (regular saver, cash ISA, other) are on the Goals tab behind its Goals / Accounts switch
+  (remembered on the device; Accounts gets a red dot when something there needs a look), with what each
   goal holds in them and what's unassigned. "edit" on a goal's line sets how much of the account is that goal's,
   with a date, or removes it: the difference comes from or goes back to unassigned (one goal entry, nothing moves
   between accounts). Balances are entered by hand now and then; any change beyond the transfers in between
@@ -85,7 +93,11 @@ There's no build step. GitHub Pages serves the files as they are.
 - **Budgets** are monthly allowances (e.g. Groceries £300). They reset each payday, and spends are logged against them.
   The Budgets tab charts spending per pay period over the last six (all budgets, or one you tap), and each
   budget's average over the finished ones against its allowance. Past periods use today's allowances.
-- **Overview.** Pay + other income − bills − the yearly bills pot = *left over*. Then subtract savings and budgets
+- **Overview.** From the top: *free to spend each day* in large type, with the days to payday and a bar of where
+  this period's income goes; **Needs you** (overdue bills, standing orders and goal payments, pay not entered, a
+  bank balance missing or from before payday); Coming up; Budget pace; then Bank balance, Savings and Pay period
+  as closed sections showing their key figure, opened with a tap.
+  Pay + other income − bills − the yearly bills pot = *left over*. Then subtract savings and budgets
   (each one's plan, or more if you've gone over it) to get *free to spend*. Savings are one row per account:
   what's been moved in this period, plus the standing order still to go, plus whatever its goals still want
   beyond that. Money that was already in the account only counts towards a goal once it's assigned. Goals with
@@ -220,8 +232,8 @@ widget to the Home Screen or Lock Screen, choose **Ledger Widget**, and set its 
 - `free`: free to spend per day, days to payday, and where the bank balance will be before payday. Medium adds the
   pay period sums; large adds what's coming up.
 - `coming`: bills and standing orders still to go out this pay period, with overdue ones in red.
-- `savings`: total savings, each account's balance with its unassigned money or maturity warning, and goal progress.
-  Tapping it opens **Ledger Save**.
+- `savings`: total savings, each account's balance with its unassigned money or maturity warning, and goal progress
+  (an allowance goal shows this cycle's use, not its lifetime total). Tapping it opens **Ledger Save**.
 - `budgets`: money left in each budget, against an even pace. Tapping it opens **Ledger Spend**.
 
 Every mode works in the small, medium and large sizes and the three Lock Screen sizes. Widgets refresh when iOS

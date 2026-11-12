@@ -23,6 +23,7 @@
     --gold-soft: #E7D5AE;
     --green-deep: #22392F;
     --danger: #A24A3B;
+    --good: #3E6B45;
     --chart: #B8863B;
     box-sizing: border-box;
     padding-top: env(safe-area-inset-top, 0px);
@@ -39,6 +40,7 @@
       --gold-soft: #4A3D25;
       --green-deep: #DDE7DE;
       --danger: #D98C79;
+      --good: #9CC79A;
       --chart: #B88A44;
     }
   }
@@ -52,6 +54,7 @@
     --gold-soft: #4A3D25;
     --green-deep: #DDE7DE;
     --danger: #D98C79;
+    --good: #9CC79A;
     --chart: #B88A44;
   }
   html { scroll-padding-top: env(safe-area-inset-top, 0px); height: 100%; }
@@ -314,6 +317,18 @@
     color: var(--ink-soft);
     margin-top: 5px;
   }
+  /* Two fields side by side (amount and how often; amount and day), with one hint under both */
+  .field-row { display: flex; gap: 10px; }
+  .field-row > .field { flex: 1; min-width: 0; }
+  .field-row + .field-hint-under { margin: -8px 0 14px; }
+  .field-hint-under:empty { display: none; }
+  .kind-switch { margin-bottom: 0; }
+  .kind-switch button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 4px; }
+  .kind-icon { font-size: 15px; line-height: 1; }
+  .more-options { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
+  .more-options summary { cursor: pointer; font-size: 12.5px; padding: 10px 0; color: var(--ink); }
+  .more-options-sub { color: var(--ink-soft); font-size: 11px; margin-left: 6px; }
+  .more-options[open] summary { margin-bottom: 6px; }
   .sheet-actions {
     display: flex;
     gap: 10px;
@@ -536,6 +551,36 @@
   }
   .goal.shifting { transition: transform .15s ease; }
 
+  /* Two or three side-by-side choices, one picked (Goals / Accounts, a goal's kind and plan) */
+  .switch { display: flex; gap: 3px; padding: 3px; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 9px; margin-bottom: 16px; }
+  .switch button { flex: 1; padding: 7px 6px; border-radius: 6px; font-size: 12px; color: var(--ink-soft); }
+  .switch button[aria-pressed="true"] { background: var(--line); color: var(--ink); font-weight: 500; }
+  .switch .flag { color: var(--danger); margin-left: 4px; }
+
+  /* Goal cards: a status label, one line of figures and one button; the rest opens on a tap */
+  .goal-card { cursor: pointer; padding: 14px 16px 12px; }
+  .goal-card .goal-head { align-items: center; margin-bottom: 8px; }
+  .goal-card .goal-name { font-size: 17px; min-width: 0; }
+  .goal-card .goal-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .goal-card .bar-track { height: 6px; margin-bottom: 8px; }
+  .goal-card .goal-foot { flex-wrap: nowrap; }
+  .goal-status {
+    flex-shrink: 0; font-size: 10.5px; padding: 2px 9px; border-radius: 10px; white-space: nowrap;
+    border: 1px solid var(--line); color: var(--ink-soft);
+  }
+  .goal-status.bad { color: var(--danger); border-color: var(--danger); }
+  .goal-status.good { color: var(--good); border-color: var(--good); }
+  .goal-toggle {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 6px 0; text-align: left;
+    color: var(--ink-soft);
+  }
+  .goal-toggle .goal-amounts { white-space: normal; line-height: 1.5; }
+  .goal-chevron { font-size: 11px; transition: transform .15s ease; }
+  .goal-toggle[aria-expanded="true"] .goal-chevron { transform: rotate(180deg); }
+  .goal-more { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; cursor: default; }
+  .goal-more .suggestion-line, .goal-more .projection-line, .goal-more .held-line { margin: 0 0 6px; }
+  .goal-more .goal-actions { justify-content: flex-start; margin: 10px 0 2px; }
+
   /* Archive */
   .btn-secondary {
     flex: 1;
@@ -661,19 +706,28 @@
   .cat-row .bar-track { height: 6px; margin-bottom: 0; }
   .cat-row.active .cat-head { font-weight: 600; }
 
-  /* Overview stats */
-  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
-  .stat {
-    background: var(--paper-raised);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 12px 14px;
-    min-width: 0;
-  }
-  .stat .lbl { font-size: 11px; color: var(--ink-soft); }
-  .stat .num { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 500; margin: 2px 0 1px; }
-  .stat .num.negative { color: var(--danger); }
-  .stat .meta { font-size: 10.5px; color: var(--ink-soft); }
+  /* Overview: one big free-per-day figure with the spending bar under it */
+  .hero { margin: 4px 0 6px; }
+  .hero-top { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: var(--ink-soft); }
+  .hero-num { font-family: 'Fraunces', serif; font-size: 46px; font-weight: 500; line-height: 1.1; margin: 4px 0 2px; letter-spacing: -0.01em; }
+  .hero-num.negative { color: var(--danger); }
+  .hero-sub { font-size: 12.5px; color: var(--ink-soft); }
+  .hero-split .split-bar { height: 10px; margin: 14px 0 8px; }
+  .hero-key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: var(--ink-soft); }
+  .hero-key .split-key { width: 8px; height: 8px; margin-right: 5px; vertical-align: 0; }
+  .statement.needs { border-color: var(--danger); }
+  /* A section that's closed until tapped, with its key figure on the closed row */
+  .fold { padding: 0 18px; margin-bottom: 10px; }
+  .fold summary { display: flex; align-items: center; gap: 10px; padding: 13px 0; cursor: pointer; list-style: none; }
+  .fold summary::-webkit-details-marker { display: none; }
+  .fold-title { font-family: 'Fraunces', serif; font-size: 16px; font-weight: 500; flex: 1; min-width: 0; }
+  .fold-title .meta { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--ink-soft); font-weight: 400; margin-top: 2px; }
+  .fold-amt { text-align: right; font-family: 'Fraunces', serif; font-size: 16px; white-space: nowrap; }
+  .fold-amt .meta { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--ink-soft); }
+  .fold-amt .negative { color: var(--danger); }
+  .fold-chevron { font-size: 11px; color: var(--ink-soft); transition: transform .15s ease; }
+  .fold[open] .fold-chevron { transform: rotate(180deg); }
+  .fold-body { border-top: 1px solid var(--line); }
   /* Where the money goes: bills, goals and budgets as one stacked bar; the empty track is what's free. */
   .split { --s-bills: #4F62C4; --s-goals: #B8863B; --s-budgets: #A04E8C; }
   @media (prefers-color-scheme: dark) {
@@ -738,14 +792,22 @@
   <section class="view" id="goalsView">
     <p class="sub">What you're saving for, and how far you've come.</p>
 
-    <div id="accountList"></div>
-    <div class="totals" id="totals"></div>
-    <input class="search-input" id="goalSearch" type="search" placeholder="Search goals" autocomplete="off" style="display:none;">
-    <div class="chip-row" id="categoryChips"></div>
-    <div class="goal-list" id="goalList"></div>
+    <div class="switch" id="goalsSwitch" style="display:none;">
+      <button type="button" data-pane="goals" aria-pressed="true">Goals</button>
+      <button type="button" data-pane="accounts" aria-pressed="false">Accounts</button>
+    </div>
+    <div id="accountsPane" hidden>
+      <div id="accountList"></div>
+    </div>
+    <div id="goalsPane">
+      <div class="totals" id="totals"></div>
+      <input class="search-input" id="goalSearch" type="search" placeholder="Search goals" autocomplete="off" style="display:none;">
+      <div class="chip-row" id="categoryChips"></div>
+      <div class="goal-list" id="goalList"></div>
 
-    <button class="add-goal-btn" id="openAddGoal">+ New goal</button>
-    <div id="goalArchive"></div>
+      <button class="add-goal-btn" id="openAddGoal">+ New goal</button>
+      <div id="goalArchive"></div>
+    </div>
   </section>
 
   <section class="view" id="billsView">
@@ -926,60 +988,80 @@
   <div class="sheet">
     <h2 id="goalSheetTitle">New goal</h2>
     <div class="field">
-      <label for="goalNameInput">What are you saving for?</label>
+      <label id="goalKindLabel">What kind?</label>
+      <div class="switch kind-switch" id="goalKindSwitch" role="group" aria-labelledby="goalKindLabel">
+        <button type="button" data-kind="save" aria-pressed="true"><span class="kind-icon" aria-hidden="true">◔</span>Save up</button>
+        <button type="button" data-kind="payoff" aria-pressed="false"><span class="kind-icon" aria-hidden="true">↗</span>Pay off</button>
+        <button type="button" data-kind="allowance" aria-pressed="false"><span class="kind-icon" aria-hidden="true">↻</span>Allowance</button>
+      </div>
+      <div class="field-hint" id="goalKindHint"></div>
+      <input id="goalResetInput" type="checkbox" hidden>
+    </div>
+    <div class="field">
+      <label for="goalNameInput">Name</label>
       <input id="goalNameInput" type="text" placeholder="e.g. New camera" maxlength="60">
     </div>
-    <div class="field">
-      <label for="goalTargetInput" id="goalTargetLabel">Target amount (optional)</label>
-      <input id="goalTargetInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
-      <div class="field-hint" id="goalTargetHint">Leave blank for a goal with no end, e.g. a loan overpayment with no fixed deadline.</div>
+    <div class="field-row">
+      <div class="field">
+        <label for="goalTargetInput" id="goalTargetLabel">Target (optional)</label>
+        <input id="goalTargetInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
+      </div>
+      <div class="field" id="goalResetFreqField" style="display:none;">
+        <label for="goalResetFreqInput">Every</label>
+        <select id="goalResetFreqInput">
+          <option value="monthly">Month</option>
+          <option value="quarterly">3 months</option>
+          <option value="yearly">Year</option>
+        </select>
+      </div>
     </div>
-    <div class="field">
-      <label class="field-check"><input id="goalResetInput" type="checkbox"> Resets on a cycle</label>
-      <div class="field-hint">For an allowance that renews, like a mortgage's yearly overpayment limit — the amount above becomes what's allowed each cycle. Unused room doesn't carry over; it just comes back fresh at the next reset.</div>
-    </div>
-    <div class="field" id="goalResetFreqField" style="display:none;">
-      <label for="goalResetFreqInput">Resets every</label>
-      <select id="goalResetFreqInput">
-        <option value="monthly">Month</option>
-        <option value="quarterly">3 months</option>
-        <option value="yearly">Year</option>
-      </select>
-    </div>
+    <div class="field-hint field-hint-under" id="goalTargetHint"></div>
     <div class="field" id="goalResetStartField" style="display:none;">
-      <label for="goalResetStartInput">First reset date</label>
+      <label for="goalResetStartInput">Resets on</label>
       <input id="goalResetStartInput" type="date">
-      <div class="field-hint">Any date it resets on — it repeats from here.</div>
+      <div class="field-hint">Any date it resets on, past or future. It repeats from there.</div>
     </div>
-    <div class="field">
-      <label class="field-check"><input id="goalStraightInput" type="checkbox"> Money goes straight out</label>
-      <div class="field-hint">For paying something off — a mortgage overpayment, loan, or transfer to a 3rd-party app. Each amount leaves your account immediately; nothing is held for the goal. Use "+ Pay" on the goal to log each payment.</div>
-    </div>
-    <div class="field">
-      <label for="goalCategoryInput">Category (optional)</label>
-      <input id="goalCategoryInput" type="text" placeholder="e.g. Travel" maxlength="30" list="categoryList">
-      <datalist id="categoryList"></datalist>
-    </div>
-    <div class="field" id="goalAccountField" style="display:none;">
-      <label for="goalAccountInput" id="goalAccountLabel">Usually kept in</label>
-      <select id="goalAccountInput"></select>
-      <div class="field-hint" id="goalAccountHint">Where adding to this goal moves money to, unless you pick another account.</div>
+    <div class="field" id="goalPlanField">
+      <label id="goalPlanLabel">How to plan it</label>
+      <div class="switch" id="goalPlanSwitch" role="group" aria-labelledby="goalPlanLabel">
+        <button type="button" data-plan="date" aria-pressed="false">By a date</button>
+        <button type="button" data-plan="monthly" aria-pressed="true">£ a month</button>
+        <button type="button" data-plan="none" aria-pressed="false">No plan</button>
+      </div>
     </div>
     <div class="field" id="goalDateField">
-      <label for="goalDateInput">Target date (optional)</label>
+      <label for="goalDateInput">Target date</label>
       <input id="goalDateInput" type="date">
-      <div class="field-hint">Set this and I'll work out how much to save each month.</div>
+      <div class="field-hint" id="goalDateHint">The amount each month is worked out from this.</div>
     </div>
-    <div class="field" id="goalMonthlyField">
-      <label for="goalMonthlyInput">Monthly amount (optional)</label>
-      <input id="goalMonthlyInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
-      <div class="field-hint" id="goalMonthlyHint">No deadline? Set how much to put in each month and it'll count in your totals.</div>
+    <div class="field-row" id="goalMonthlyRow">
+      <div class="field" id="goalMonthlyField">
+        <label for="goalMonthlyInput" id="goalMonthlyLabel">Each month</label>
+        <input id="goalMonthlyInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
+      </div>
+      <div class="field" id="goalDayField">
+        <label for="goalDayInput">On day (optional)</label>
+        <input id="goalDayInput" type="number" inputmode="numeric" placeholder="e.g. 1" min="1" max="31" step="1">
+      </div>
     </div>
-    <div class="field" id="goalDayField">
-      <label for="goalDayInput">Day of the month (optional)</label>
-      <input id="goalDayInput" type="number" inputmode="numeric" placeholder="e.g. 1" min="1" max="31" step="1">
-      <div class="field-hint">The day it usually goes, e.g. a direct debit. It then shows in "Coming up" on the Overview.</div>
+    <div class="field-hint field-hint-under" id="goalMonthlyHint"></div>
+    <div class="field" id="goalStraightField">
+      <label class="field-check"><input id="goalStraightInput" type="checkbox"> Paid straight out</label>
+      <div class="field-hint">Each payment leaves your account straight away, like a mortgage overpayment. Nothing is held for it.</div>
     </div>
+    <details class="more-options" id="goalMoreOptions">
+      <summary>More options <span class="more-options-sub" id="goalMoreSummary">category, account</span></summary>
+      <div class="field">
+        <label for="goalCategoryInput">Category (optional)</label>
+        <input id="goalCategoryInput" type="text" placeholder="e.g. Travel" maxlength="30" list="categoryList">
+        <datalist id="categoryList"></datalist>
+      </div>
+      <div class="field" id="goalAccountField" style="display:none;">
+        <label for="goalAccountInput" id="goalAccountLabel">Usually kept in</label>
+        <select id="goalAccountInput"></select>
+        <div class="field-hint" id="goalAccountHint">Where adding to this goal moves money to, unless you pick another account.</div>
+      </div>
+    </details>
     <div class="sheet-actions">
       <button class="btn-cancel" id="cancelGoal">Cancel</button>
       <button class="btn-primary" id="saveGoal">Save goal</button>
@@ -1305,6 +1387,7 @@
   let billAmountHistory = []; // a bill's past amounts, oldest first, recorded whenever its amount is edited
   let billHistoryReady = false; // false until migration 009 has been run; price-change notes stay hidden until then
   const showArchived = { goals: false, bills: false, budgets: false, accounts: false };
+  const overviewFolds = new Set(); // which of the Overview's closed sections are open (bank balance, savings, pay period)
   let showOverviewHistory = false; // the Overview's History section (charts and past pay) starts closed
   const RECAP_SEEN_KEY = 'ledger-recap-period-seen';
   let recapCard; // undefined until decided this session; null once decided there's nothing to show
@@ -1703,13 +1786,77 @@
   }
 
   // ---------- Main render ----------
+  // The Goals tab shows goals or savings accounts, one at a time. Which is remembered on this device. The
+  // switch only appears once the accounts tables exist; until then it's goals only.
+  let goalsPane = 'goals';
+  try { if (localStorage.getItem('ledger.goalsPane') === 'accounts') goalsPane = 'accounts'; } catch (e) { /* storage blocked */ }
+
+  function syncGoalsSwitch() {
+    const sw = document.getElementById('goalsSwitch');
+    const pane = accountsReady ? goalsPane : 'goals';
+    sw.style.display = accountsReady ? 'flex' : 'none';
+    document.getElementById('goalsPane').hidden = pane !== 'goals';
+    document.getElementById('accountsPane').hidden = pane !== 'accounts';
+    // Counts, and a mark on Accounts when something there needs a look (unassigned money, an allowance gone over).
+    const flag = !!document.querySelector('#accountList .warn');
+    sw.querySelector('[data-pane="goals"]').innerHTML = `Goals · ${liveGoals().length}`;
+    sw.querySelector('[data-pane="accounts"]').innerHTML =
+      `Accounts · ${accountsReady ? liveAccounts().length : 0}${flag ? '<span class="flag" aria-label="needs a look">●</span>' : ''}`;
+    sw.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.pane === pane));
+  }
+  document.querySelectorAll('#goalsSwitch button').forEach(b => b.addEventListener('click', () => {
+    goalsPane = b.dataset.pane;
+    try { localStorage.setItem('ledger.goalsPane', goalsPane); } catch (e) { /* storage blocked */ }
+    syncGoalsSwitch();
+  }));
+
   function render() {
     indexPayments();
     renderAccounts();
     renderGoals();
+    syncGoalsSwitch();
     renderBills();
     renderBudgets();
     renderOverview();
+  }
+
+  // Goal cards whose details are open. Kept across renders, not across reloads.
+  const openGoalIds = new Set();
+
+  // The three kinds of goal the goal sheet offers, from the two flags that make them.
+  function goalKind(g) {
+    return g.resetFrequency ? 'allowance' : g.straightOut ? 'payoff' : 'save';
+  }
+  function goalKindLabel(g) {
+    if (g.resetFrequency) {
+      const every = { monthly: 'monthly', quarterly: 'every 3 months', yearly: 'yearly' }[g.resetFrequency];
+      return `Allowance, resets ${every}${g.straightOut ? ', paid straight out' : ''}`;
+    }
+    return g.straightOut ? 'Paying off' : '';
+  }
+
+  // The label at the top right of a goal card: the one thing to know about it at a glance, or null.
+  //   bad   — behind, past its date, or over its allowance
+  //   good  — done, on track or ahead, or this month's amount is in
+  //   quiet — skipped, or (for an allowance) what's left this cycle
+  function goalStatus(g, plan, allowance, done, canPayOut) {
+    const thisMonthIn = plan.planned > 0 && plan.savedThisPeriod >= plan.planned;
+    const verb = g.straightOut ? 'paid' : 'saved';
+    const whole = v => formatMoney(Math.round(v));
+    if (allowance) {
+      if (allowance.over) return { tone: 'bad', text: `${whole(allowance.used - allowance.allowance)} over` };
+      if (plan.skip) return { tone: 'quiet', text: 'Skipped' };
+      if (thisMonthIn) return { tone: 'good', text: `✓ ${verb} this month` };
+      return { tone: 'quiet', text: `${whole(allowance.left)} left` };
+    }
+    if (done) return { tone: 'good', text: canPayOut ? 'Ready' : 'Done' };
+    if (plan.overdue) return { tone: 'bad', text: 'Date passed' };
+    if (plan.skip) return { tone: 'quiet', text: 'Skipped' };
+    const p = plan.projection;
+    if (p && p.tone === 'behind') return { tone: 'bad', text: `${whole(p.behindBy)} behind` };
+    if (thisMonthIn) return { tone: 'good', text: `✓ ${verb} this month` };
+    if (p && p.tone === 'good') return { tone: 'good', text: /ahead/.test(p.text) ? p.text.replace(/ of schedule$/, '') : 'On track' };
+    return null;
   }
 
   function renderGoals() {
@@ -1806,50 +1953,73 @@
       const plainHeld = held.size === 1 && !out && (held.keys().next().value || null) === (g.accountId || null);
       const heldHtml = !g.straightOut && (out > 0.005 || (held.size && !plainHeld))
         ? `<div class="held-line">${[...heldParts, out > 0.005 ? `${formatMoney(out)} paid out` : ''].filter(Boolean).join(' · ')}</div>` : '';
+      // The one-line summary under the bar: where it stands, plus this month's amount while there's one to pay.
+      const perMonth = !done && !plan.skip && plan.planned > 0 && plan.savedThisPeriod < plan.planned
+        ? ` · ${formatMoney(plan.planned)}/mo` : '';
       const amountsHtml = allowance
-        ? `<span class="saved">${formatMoney(allowance.used)}</span> of ${formatMoney(allowance.allowance)} this cycle · resets ${shortDate(allowance.end)}`
+        ? `<span class="saved">${formatMoney(allowance.used)}</span> of ${formatMoney(allowance.allowance)}${perMonth}`
         : hasTarget(g)
-        ? `<span class="saved">${formatMoney(g.saved)}</span> of ${formatMoney(g.target)} · ${pct.toFixed(0)}%`
-        : `<span class="saved">${formatMoney(g.saved)}</span> ${g.straightOut ? 'paid' : 'saved'} · no target`;
+        ? `<span class="saved">${formatMoney(g.saved)}</span> of ${formatMoney(g.target)}${perMonth}`
+        : `<span class="saved">${formatMoney(g.saved)}</span> ${g.straightOut ? 'paid' : 'saved'}${perMonth}`;
       const canPayOut = !g.straightOut && heldSum > 0.005;
+      const status = goalStatus(g, plan, allowance, done, canPayOut);
+      // One main button on the card; everything else waits behind a tap on the card.
       let mainBtn;
       if (g.straightOut) mainBtn = `<button class="btn-small add-deposit" data-id="${g.id}">+ Pay</button>`;
       else if (done) mainBtn = canPayOut
         ? `<button class="btn-small pay-out" data-id="${g.id}">Pay out</button>`
         : `<button class="btn-small archive-goal" data-id="${g.id}">Archive</button>`;
-      else mainBtn = `${canPayOut ? `<button class="btn-small pay-out" data-id="${g.id}">Pay out</button>` : ''}<button class="btn-small add-deposit" data-id="${g.id}">+ Add</button>`;
-      let skipBtnHtml = '';
-      if (plan.skip) skipBtnHtml = `<button class="btn-small unskip-goal" data-id="${plan.skip.id}">Unskip</button>`;
-      else if (plan.planned > 0 && plan.savedThisPeriod < plan.planned) skipBtnHtml = `<button class="btn-small skip-goal" data-id="${g.id}">Skip month</button>`;
-      const catchUpBtnHtml = catchUp > 0
-        ? `<button class="btn-small catch-up-goal" data-id="${g.id}" data-amount="${catchUp}">Catch up ${formatMoney(catchUp)}</button>` : '';
+      else mainBtn = `<button class="btn-small add-deposit" data-id="${g.id}">+ Add</button>`;
+      const moreBtns = [
+        catchUp > 0 ? `<button class="btn-small catch-up-goal" data-id="${g.id}" data-amount="${catchUp}">Catch up ${formatMoney(catchUp)}</button>` : '',
+        plan.skip ? `<button class="btn-small unskip-goal" data-id="${plan.skip.id}">Unskip</button>`
+          : plan.planned > 0 && plan.savedThisPeriod < plan.planned ? `<button class="btn-small skip-goal" data-id="${g.id}">Skip month</button>` : '',
+        !done && canPayOut ? `<button class="btn-small pay-out" data-id="${g.id}">Pay out</button>` : '',
+        `<button class="btn-small history-btn" data-id="${g.id}">History</button>`,
+        `<button class="btn-small edit-goal" data-id="${g.id}">Edit</button>`
+      ].join('');
+      const kindLine = [goalKindLabel(g), allowance && `next reset ${shortDate(allowance.end)}`, g.category, accountOf(g) && (g.straightOut ? `from ${accountOf(g).name}` : `kept in ${accountOf(g).name}`)]
+        .filter(Boolean).map(escapeHtml).join(' · ');
+      const open = openGoalIds.has(g.id);
       const handleHtml = displayed.length > 1
         ? `<button class="drag-handle" data-id="${g.id}" aria-label="Reorder ${escapeHtml(g.name)} — drag, or use the arrow keys">⠿</button>` : '';
       return `
-        <div class="goal ${done ? 'done' : ''}" data-id="${g.id}">
+        <div class="goal goal-card ${done ? 'done' : ''}" data-id="${g.id}">
           <div class="goal-head">
             <div class="goal-name">${handleHtml}<span>${done ? '✓ ' : ''}${escapeHtml(g.name)}</span></div>
-            <div class="goal-head-actions">
-              <button class="btn-icon edit-goal" data-id="${g.id}">edit</button>
-            </div>
+            ${status ? `<span class="goal-status ${status.tone}">${status.text}</span>` : ''}
           </div>
-          ${g.category || accountOf(g) || g.straightOut || g.resetFrequency ? `<div class="badge-category">${[g.category, g.straightOut ? 'paid straight out' : '', accountOf(g) && (g.straightOut ? `from ${accountOf(g).name}` : accountOf(g).name), g.resetFrequency ? `resets ${{ monthly: 'monthly', quarterly: 'every 3 months', yearly: 'yearly' }[g.resetFrequency]}` : ''].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
           ${hasTarget(g) ? `<div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>` : ''}
-          ${suggestionHtml}
-          ${projectionHtml}
-          ${heldHtml}
           <div class="goal-foot">
-            <div class="goal-amounts">${amountsHtml}</div>
-            <div class="goal-actions">
-              <button class="btn-small history-btn" data-id="${g.id}">History</button>
-              ${catchUpBtnHtml}
-              ${skipBtnHtml}
-              ${mainBtn}
-            </div>
+            <button class="goal-toggle" data-id="${g.id}" aria-expanded="${open}" aria-controls="goal-more-${g.id}">
+              <span class="goal-amounts">${amountsHtml}</span><span class="goal-chevron" aria-hidden="true">▾</span>
+            </button>
+            ${mainBtn}
+          </div>
+          <div class="goal-more" id="goal-more-${g.id}" ${open ? '' : 'hidden'}>
+            ${kindLine ? `<div class="held-line">${kindLine}</div>` : ''}
+            ${suggestionHtml}
+            ${projectionHtml}
+            ${heldHtml}
+            <div class="goal-actions">${moreBtns}</div>
           </div>
         </div>
       `;
     }).join('');
+
+    // Tapping a card (anywhere but its buttons) opens or closes its details.
+    const toggleGoal = id => {
+      if (openGoalIds.has(id)) openGoalIds.delete(id); else openGoalIds.add(id);
+      const card = list.querySelector(`.goal[data-id="${id}"]`);
+      const open = openGoalIds.has(id);
+      card.querySelector('.goal-more').hidden = !open;
+      card.querySelector('.goal-toggle').setAttribute('aria-expanded', open);
+    };
+    list.querySelectorAll('.goal-toggle').forEach(btn => btn.addEventListener('click', () => toggleGoal(btn.dataset.id)));
+    list.querySelectorAll('.goal-card').forEach(card => card.addEventListener('click', e => {
+      if (e.target.closest('button, a, input, .goal-more')) return;
+      toggleGoal(card.dataset.id);
+    }));
 
     list.querySelectorAll('.add-deposit').forEach(btn => btn.addEventListener('click', () => openAddToGoal(btn.dataset.id)));
     list.querySelectorAll('.catch-up-goal').forEach(btn => btn.addEventListener('click', () => openAddToGoal(btn.dataset.id, Number(btn.dataset.amount))));
@@ -1886,7 +2056,7 @@
     const today = startOfToday();
     const period = currentPayPeriod();
     const dayMonth = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-    let html = `<h3 class="section-title" style="margin-top: 0;">Savings accounts</h3>`;
+    let html = '';
 
     if (!live.length) {
       html += `<div class="statement"><div class="statement-row"><div>No savings accounts yet<span class="meta">Add your regular saver or ISA to keep track of what you move in, what's unassigned and the interest.</span></div></div></div>`;
@@ -1998,7 +2168,6 @@
       html += `<div class="account-note" style="margin-top: 10px;">Interest outside ISAs this tax year: ${formatMoney(outsideIsaInterest)} of the ${formatMoney(PERSONAL_SAVINGS_ALLOWANCE)} you can earn tax-free as a basic-rate taxpayer (£500 at higher rate).</div>`;
     }
     html += `<button class="add-goal-btn" id="openAddAccount">+ Savings account</button><div id="accountArchive"></div>`;
-    if (live.length) html += `<h3 class="section-title">Goals</h3>`;
     el.innerHTML = html;
 
     renderArchive('accountArchive', 'accounts', accounts.filter(a => a.archived).map(a => ({
@@ -2571,36 +2740,88 @@
   const goalResetFreqInput = document.getElementById('goalResetFreqInput');
   const goalResetStartInput = document.getElementById('goalResetStartInput');
 
-  // A target date sets the monthly amount itself, so the manual one only shows without a date. A date needs a
-  // target, so it hides when there's none. The day of the month goes with a monthly amount. "Resets on a cycle"
-  // is a third shape: it hides the target date (the reset is its own deadline) and repurposes the target amount
-  // as the allowance per cycle. It can still have a monthly amount and day.
+  // The sheet starts with what kind of goal it is, which decides the fields below it:
+  //   save      — money builds up for it (straight_out off, no reset)
+  //   payoff    — each payment leaves the account straight away (straight_out on, no reset)
+  //   allowance — a limit that renews each cycle (reset set); the target is the allowance per cycle, there's no
+  //               target date (the reset is its deadline), and it may or may not be paid straight out
+  // Save and pay off then pick a plan: by a date (the monthly amount is worked out), a set amount a month, or none.
+  // The kind lives in the two checkboxes the save code reads; the plan only decides which of date/monthly is kept.
+  let goalPlanMode = 'monthly';
+  const GOAL_KIND_HINTS = {
+    save: 'Money builds up for it until you spend it.',
+    payoff: 'Each payment leaves your account straight away, like a loan or an overpayment.',
+    allowance: "A limit that renews, like a yearly overpayment cap. Unused room doesn't carry over."
+  };
+
+  function currentGoalKind() {
+    return goalResetInput.checked ? 'allowance' : goalStraightInput.checked ? 'payoff' : 'save';
+  }
+
+  function setGoalKind(kind) {
+    goalResetInput.checked = kind === 'allowance';
+    if (kind === 'save') goalStraightInput.checked = false;
+    if (kind === 'payoff') goalStraightInput.checked = true;
+    syncGoalMonthlyField();
+  }
+
   function syncGoalMonthlyField() {
-    const resetOn = goalResetInput.checked;
-    const hasDate = !resetOn && (goalDateInput.value || hasBadDate(goalDateInput));
-    const hasTargetValue = parseFloat(goalTargetInput.value) > 0;
-    document.getElementById('goalResetFreqField').style.display = resetOn ? 'block' : 'none';
-    document.getElementById('goalResetStartField').style.display = resetOn ? 'block' : 'none';
-    document.getElementById('goalDateField').style.display = !resetOn && (hasTargetValue || hasDate) ? 'block' : 'none';
-    document.getElementById('goalMonthlyField').style.display = hasDate ? 'none' : 'block';
-    document.getElementById('goalDayField').style.display = !hasDate && goalMonthlyInput.value ? 'block' : 'none';
-    const perMonth = hasTargetValue ? parseFloat(goalTargetInput.value) * LedgerCore.PER_MONTH[goalResetFreqInput.value] : 0;
-    document.getElementById('goalMonthlyHint').textContent = resetOn
-      ? `Optional. Set it and it counts in your totals each month, stopping once this cycle's allowance is used.${perMonth ? ` Using it all takes ${formatMoney(perMonth)}/mo.` : ''}`
-      : "No deadline? Set how much to put in each month and it'll count in your totals.";
-    document.getElementById('goalTargetLabel').textContent = resetOn ? 'Allowance per cycle' : 'Target amount (optional)';
-    document.getElementById('goalTargetHint').textContent = resetOn
-      ? "What can go in before it resets — unused room doesn't carry over."
-      : 'Leave blank for a goal with no end, e.g. a loan overpayment with no fixed deadline.';
+    const kind = currentGoalKind();
+    const allowance = kind === 'allowance';
+    const show = (id, on) => { document.getElementById(id).style.display = on ? '' : 'none'; };
+    document.querySelectorAll('#goalKindSwitch button').forEach(b => b.setAttribute('aria-pressed', b.dataset.kind === kind));
+    document.querySelectorAll('#goalPlanSwitch button').forEach(b => b.setAttribute('aria-pressed', b.dataset.plan === goalPlanMode));
+    document.getElementById('goalKindHint').textContent = GOAL_KIND_HINTS[kind];
+
+    const target = parseFloat(goalTargetInput.value);
+    const hasTargetValue = target > 0;
+    document.getElementById('goalTargetLabel').textContent =
+      { save: 'Target (optional)', payoff: 'Amount to pay off (optional)', allowance: 'Allowance' }[kind];
+    document.getElementById('goalTargetHint').textContent = allowance || hasTargetValue ? '' : 'Leave blank for one with no end.';
+    show('goalResetFreqField', allowance);
+    show('goalResetStartField', allowance);
+    show('goalStraightField', allowance);
+    show('goalPlanField', !allowance);
+
+    const byDate = !allowance && goalPlanMode === 'date';
+    show('goalDateField', byDate);
+    let dateHint = 'The amount each month is worked out from this.';
+    if (byDate && hasTargetValue && goalDateInput.value && !hasBadDate(goalDateInput)) {
+      const g = editingGoalId ? goals.find(x => x.id === editingGoalId) : null;
+      const left = target - (g ? g.saved : 0);
+      const months = Math.ceil((parseLocalDate(goalDateInput.value) - startOfToday()) / LedgerCore.AVG_MONTH_MS);
+      if (left > 0 && months > 0) dateHint = `That's about ${formatMoney(left / months)} a month.`;
+    }
+    document.getElementById('goalDateHint').textContent = dateHint;
+
+    show('goalMonthlyRow', allowance || goalPlanMode === 'monthly');
+    document.getElementById('goalMonthlyLabel').textContent =
+      allowance ? 'Each month (optional)' : kind === 'payoff' ? 'Pay each month' : 'Save each month';
+    const perMonth = allowance && hasTargetValue ? target * LedgerCore.PER_MONTH[goalResetFreqInput.value] : 0;
+    document.getElementById('goalMonthlyHint').textContent = allowance
+      ? `${perMonth ? `Using it all takes ${formatMoney(perMonth)} a month. ` : ''}It stops once the cycle's allowance is used.`
+      : '';
+
     const straight = goalStraightInput.checked;
     document.getElementById('goalAccountLabel').textContent = straight ? 'Usually paid from' : 'Usually kept in';
     document.getElementById('goalAccountHint').textContent = straight
       ? 'The account adding to this goal takes the money out of, unless you pick another.'
       : 'Where adding to this goal moves money to, unless you pick another account.';
     document.querySelector('#goalAccountInput option[value=""]').textContent = straight ? 'Current account' : 'Current account (not moved)';
+    // What's tucked away under "More options", so it isn't forgotten.
+    const accountSel = document.getElementById('goalAccountInput');
+    const accountName = accountSel.value ? accountSel.options[accountSel.selectedIndex].textContent : '';
+    const tucked = [goalCategoryInput.value.trim(), accountName].filter(Boolean);
+    document.getElementById('goalMoreSummary').textContent = tucked.length ? tucked.join(' · ')
+      : document.getElementById('goalAccountField').style.display === 'none' ? 'category' : 'category, account';
   }
-  [goalDateInput, goalTargetInput, goalMonthlyInput, goalResetStartInput].forEach(i => i.addEventListener('input', syncGoalMonthlyField));
-  [goalStraightInput, goalResetInput, goalResetFreqInput].forEach(i => i.addEventListener('change', syncGoalMonthlyField));
+  [goalDateInput, goalTargetInput, goalMonthlyInput, goalResetStartInput, goalCategoryInput].forEach(i => i.addEventListener('input', syncGoalMonthlyField));
+  [goalStraightInput, goalResetFreqInput, document.getElementById('goalAccountInput')].forEach(i => i.addEventListener('change', syncGoalMonthlyField));
+  document.querySelectorAll('#goalKindSwitch button').forEach(b => b.addEventListener('click', () => setGoalKind(b.dataset.kind)));
+  document.querySelectorAll('#goalPlanSwitch button').forEach(b => b.addEventListener('click', () => {
+    goalPlanMode = b.dataset.plan;
+    syncGoalMonthlyField();
+  }));
 
   // Lists the live savings accounts (plus the goal's own, if it's been archived since). Hidden when there are none.
   function fillGoalAccountSelect(goal) {
@@ -2629,6 +2850,7 @@
       goalResetInput.checked = !!g.resetFrequency;
       goalResetFreqInput.value = g.resetFrequency || 'yearly';
       goalResetStartInput.value = g.resetStart || '';
+      goalPlanMode = g.targetDate ? 'date' : g.monthlyAmount ? 'monthly' : 'none';
       deleteGoalRow.style.display = 'flex';
     } else {
       goalSheetTitle.textContent = 'New goal';
@@ -2642,8 +2864,11 @@
       goalResetInput.checked = false;
       goalResetFreqInput.value = 'yearly';
       goalResetStartInput.value = '';
+      goalPlanMode = 'monthly';
       deleteGoalRow.style.display = 'none';
     }
+    // "More options" starts open only when something's set in it.
+    document.getElementById('goalMoreOptions').open = !!(goalCategoryInput.value || document.getElementById('goalAccountInput').value);
     syncGoalMonthlyField();
     goalOverlay.classList.add('open');
     setTimeout(() => goalNameInput.focus(), 100);
@@ -2664,13 +2889,17 @@
     const target = targetRaw ? parseFloat(targetRaw) : null;
     const category = goalCategoryInput.value.trim();
     const resetOn = goalResetInput.checked;
-    const targetDate = resetOn ? null : (goalDateInput.value || null);
+    // Only the plan that's picked is kept: a date, or an amount a month (an allowance can always have the latter).
+    const byDate = !resetOn && goalPlanMode === 'date';
+    const byMonth = resetOn || goalPlanMode === 'monthly';
+    const targetDate = byDate ? (goalDateInput.value || null) : null;
     if (!name) { showToast('Give the goal a name'); return; }
     if (target !== null && !(target > 0)) { showToast('Enter a target above £0, or leave it blank'); return; }
-    if (!resetOn && hasBadDate(goalDateInput)) { showToast("That target date doesn't exist"); return; }
+    if (byDate && hasBadDate(goalDateInput)) { showToast("That target date doesn't exist"); return; }
+    if (byDate && !targetDate) { showToast('Pick a target date, or choose another plan'); return; }
     if (targetDate && !target) { showToast('A target date needs a target amount'); return; }
     const monthlyRaw = goalMonthlyInput.value.trim();
-    const monthlyAmount = targetDate || !monthlyRaw ? null : parseFloat(monthlyRaw);
+    const monthlyAmount = !byMonth || !monthlyRaw ? null : parseFloat(monthlyRaw);
     if (monthlyAmount !== null && !(monthlyAmount > 0)) { showToast('Enter a monthly amount above £0'); return; }
     const dayRaw = goalDayInput.value.trim();
     const monthlyDay = monthlyAmount && dayRaw ? parseInt(dayRaw, 10) : null;
@@ -3834,36 +4063,40 @@
       });
     });
 
-    const stat = (lbl, num, meta, negative) =>
-      `<div class="stat"><div class="lbl">${lbl}</div><div class="num ${negative ? 'negative' : ''}">${num}</div><div class="meta">${meta}</div></div>`;
-    html += `<div class="stat-grid">
-      ${pay
-        ? stat('Free per day', formatMoney(free / daysLeft), `${formatMoney(free)} until payday`, free < 0)
-        : stat('Free per day', '—', 'enter pay to see this')}
-      ${stat('Payday in', `${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
-        period.nextPayday.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }))}
-      ${stat('Bills to pay', formatMoney(billsLeft),
-        billsOverdue ? `<span style="color: var(--danger)">${billsOverdue} overdue</span>` : billsLeft > 0 ? 'before payday' : 'all paid this period')}
-      ${liveAccounts().length
-        ? stat('Savings', formatMoney(savingsTotal), `${formatMoney(inGoalsTotal)} of it for goals`)
-        : live.length
-        ? stat('Set aside for goals', formatMoney(heldInCurrent), 'in your current account')
-        : stat('Saved in goals', formatMoney(0), 'no goals yet')}
-    </div>`;
+    // The page is built from separate pieces, put together at the end:
+    //   hero      — free per day, with the spending bar
+    //   needs     — anything waiting on you: overdue items, pay or a balance to enter
+    //   coming up, budget pace — always shown
+    //   folds     — bank balance, savings and the pay period breakdown, each closed until tapped (remembered
+    //               across renders in `overviewFolds`), with its key figure on the closed row
+    //   history   — charts and past pay, behind their own toggle
+    const needs = [];
+    const fold = (key, title, amtHtml, body) => body ? `
+      <details class="statement fold" data-fold="${key}" ${overviewFolds.has(key) ? 'open' : ''}>
+        <summary><span class="fold-title">${title}</span><span class="fold-amt">${amtHtml}</span><span class="fold-chevron" aria-hidden="true">▾</span></summary>
+        <div class="fold-body">${body}</div>
+      </details>` : '';
+    if (!pay) needs.push(`
+      <div class="statement-row">
+        <div>Pay<span class="meta">not entered for ${shortDate(period.start)} yet</span></div>
+        <div class="row-end"><button class="btn-small add-pay" data-date="${paydayISO}">Enter pay</button></div>
+      </div>`);
 
     // ---------- Bank balance ----------
     const latestBalance = balances[balances.length - 1] || null;
     const paydayShort = period.nextPayday.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
     // The current account as it stands now, for the total with savings below: the estimate when there is one.
     let currentNow = latestBalance ? latestBalance.amount : null;
-    html += `<h3 class="section-title" style="margin-top: 0;">Bank balance <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${accountInfos.length ? 'current account and savings' : 'current account'}</span></h3><div class="statement">`;
+    let balanceFoldAmt = '';
+    const balanceStart = html.length;
     if (!latestBalance) {
-      html += `
+      needs.push(`
         <div class="statement-row">
-          <div>Current account<span class="meta">add your balance to see where you'll be on payday</span></div>
-          <div class="row-end"><button class="btn-small update-balance">Add balance</button></div>
-        </div>`;
+          <div>Bank balance<span class="meta">add it to see where you'll be on payday</span></div>
+          <div class="row-end"><button class="btn-small update-balance">Add</button></div>
+        </div>`);
     } else {
+      balanceFoldAmt = formatMoney(latestBalance.amount);
       const enteredAt = new Date(latestBalance.createdAt);
       html += `
         <div class="statement-row">
@@ -3875,9 +4108,15 @@
         </div>`;
       if (enteredAt < period.start) {
         html += `<div class="balance-note">This was entered before payday, so it can't be used for this pay period. Update it to see where you'll be on ${paydayShort}.</div>`;
+        needs.push(`
+          <div class="statement-row">
+            <div>Bank balance<span class="meta">last entered before payday · update it to see where you'll be on ${paydayShort}</span></div>
+            <div class="row-end"><button class="btn-small update-balance">Update</button></div>
+          </div>`);
       } else {
         const out = balanceOutlook(latestBalance, period);
         const fc = out.forecast;
+        balanceFoldAmt = `<span class="${neg(fc.end)}">${formatMoney(fc.end)}</span><span class="meta">before payday</span>`;
         // "Estimated now" only counts what's dated before today, but savings balances already include transfers
         // made today (or dated later), so take those off here or the total would count them twice.
         currentNow = fc.now - transfers
@@ -3939,13 +4178,14 @@
         }
       }
     }
-    html += '</div>';
+    const balanceHtml = html.slice(balanceStart);
+    html = html.slice(0, balanceStart);
 
     // Savings: each account's balance, how much of it is for goals and how much isn't, then the total across
     // everything, so the whole picture is in one place. Goal money set aside in the current account gets a line too.
+    let savingsHtml = '', savingsFoldAmt = '';
     if (accountInfos.length) {
-      html += `<h3 class="section-title">Savings <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">what's for goals, and what isn't</span></h3>`;
-      html += '<div class="statement">';
+      const savingsStart = html.length;
       html += accountInfos.map(({ a, info }) => {
         const split = [
           info.inGoals > 0.005 ? `${formatMoney(info.inGoals)} for goals` : '',
@@ -3973,7 +4213,9 @@
             <div>Total<span class="meta">current account ${Math.abs(currentNow - latestBalance.amount) < 0.005 ? '' : 'estimated now '}plus savings</span></div>
             <div class="amt ${neg(currentNow + savingsTotal)}">${formatMoney(currentNow + savingsTotal)}</div>
           </div>`;
-      html += '</div>';
+      savingsHtml = html.slice(savingsStart);
+      html = html.slice(0, savingsStart);
+      savingsFoldAmt = `${formatMoney(savingsTotal)}<span class="meta">${formatMoney(inGoalsTotal)} for goals</span>`;
     }
 
     // Other income sits under pay: one row per source. Sources due this period count towards left over;
@@ -4005,9 +4247,7 @@
           <div class="row-end"><button class="btn-small" id="openAddIncome">+ Other income</button></div>
         </div>`;
 
-    html += `
-      <h3 class="section-title">Pay period <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${periodLabel}</span></h3>
-      <div class="statement">
+    const payPeriodHtml = `
         <div class="statement-row">
           <div>Pay<span class="meta">${pay ? '' : 'not entered yet · '}paid ${shortDate(period.start)}</span></div>
           <div class="row-end">
@@ -4051,8 +4291,8 @@
           <div>Free to spend</div>
           <div class="amt ${neg(free)}">${formatMoney(free)}</div>
         </div>` : ''}
-      </div>
     `;
+    const payFoldAmt = `<span class="${neg(leftOver)}">${formatMoney(leftOver)}</span><span class="meta">left after bills</span>`;
 
     // ---------- Where the money goes ----------
     // This period's income split into bills, goals and budgets; the unfilled part of the bar is what's free.
@@ -4063,35 +4303,32 @@
       { key: 'budgets', name: 'Budgets', value: budgetsCommitted }
     ].filter(p => p.value > 0);
     const outgoing = parts.reduce((s, p) => s + p.value, 0);
-    let splitTips = [];
+    // Drawn in the hero, under the free-per-day figure: a bar plus a one-line key. Tap a part for its figures.
+    let splitTips = [], splitHtml = '';
     if (income > 0 && outgoing > 0) {
       const whole = Math.max(income, outgoing);
       const share = v => `${Math.round((v / income) * 100)}%`;
       const tip = p => `<div class="tip-title">${p.name}</div>
         <div class="tip-row"><span>This period</span><b>${formatMoney(p.value)}</b></div>
         <div class="tip-row"><span>Of income</span><b>${share(p.value)}</b></div>`;
-      html += `
-        <div class="statement split chart" style="padding-bottom: 4px; margin-top: 10px;">
+      const pounds = v => formatMoney(Math.round(v));
+      splitHtml = `
+        <div class="split chart hero-split">
           <div class="split-bar" role="img" aria-label="${parts.map(p => `${p.name} ${share(p.value)}`).join(', ')}, free ${share(Math.max(0, free))}">
             ${parts.map((p, i) => `<div class="seg" data-i="${i}" style="width:${(p.value / whole) * 100}%; background: var(--s-${p.key});"></div>`).join('')}
           </div>
-          ${parts.map(p => `
-            <div class="split-row">
-              <span><span class="split-key" style="background: var(--s-${p.key});"></span>${p.name}</span>
-              <span class="amt"><b>${formatMoney(p.value)}</b> · ${share(p.value)}</span>
-            </div>`).join('')}
-          <div class="split-row">
-            <span><span class="split-key free"></span>${free < 0 ? 'Over by' : 'Free'}</span>
-            <span class="amt"><b ${free < 0 ? 'style="color: var(--danger)"' : ''}>${formatMoney(Math.abs(free))}</b>${free < 0 ? '' : ` · ${share(free)}`}</span>
+          <div class="hero-key">
+            ${parts.map(p => `<span><span class="split-key" style="background: var(--s-${p.key});"></span>${p.name.toLowerCase()} ${pounds(p.value)}</span>`).join('')}
+            <span><span class="split-key free"></span>${free < 0 ? 'over by' : 'free'} ${pounds(Math.abs(free))}</span>
           </div>
-        </div>
-      `;
+        </div>`;
       splitTips = parts.map(tip);
     }
 
     // ---------- Budget pace ----------
     // Spending across all budgets against an even spread over the pay period; the tick marks today.
     const budgetTotal = liveBudgets().reduce((s, b) => s + b.amount, 0);
+    const paceStart = html.length;
     if (budgetTotal > 0) {
       const periodDays = Math.round((period.nextPayday - period.start) / 86400000);
       const dayNum = Math.round((today - period.start) / 86400000) + 1;
@@ -4123,13 +4360,14 @@
       isGoal: i.kind === 'goal'
     }));
 
-    html += `<h3 class="section-title">Coming up <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">next payday ${shortDate(period.nextPayday)}</span></h3><div class="statement">`;
-    html += items.length === 0
-      ? '<div class="statement-empty">Nothing left unpaid this period.</div>'
-      : items.map(({ b, d, isIncome, isStanding, isGoal }) => {
+    const budgetPaceHtml = html.slice(paceStart);
+    html = html.slice(0, paceStart);
+
+    // Overdue items go to "Needs you" at the top; the rest are listed here.
+    const itemRow = ({ b, d, isIncome, isStanding, isGoal }) => {
         const overdue = !isIncome && d < today;
         const when = overdue
-          ? `Overdue · ${shortDate(d)}`
+          ? `Overdue since ${shortDate(d)}`
           : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
         return `
           <div class="statement-row">
@@ -4144,8 +4382,19 @@
             </div>
           </div>
         `;
-      }).join('');
+    };
+    const isOverdue = i => !i.isIncome && i.d < today;
+    needs.unshift(...items.filter(isOverdue).map(itemRow));
+    const upcoming = items.filter(i => !isOverdue(i));
+    html += `<h3 class="section-title">Coming up <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${billsLeft > 0.005 ? `${formatMoney(billsLeft)} of bills before payday` : `next payday ${shortDate(period.nextPayday)}`}</span></h3><div class="statement">`;
+    html += upcoming.length === 0
+      ? `<div class="statement-empty">${needs.length ? 'Nothing else' : 'Nothing'} left to pay this period.</div>`
+      : upcoming.map(itemRow).join('');
     html += '</div>';
+    html += budgetPaceHtml;
+    html += fold('balance', 'Bank balance', balanceFoldAmt, balanceHtml);
+    html += fold('savings', 'Savings', savingsFoldAmt, savingsHtml);
+    html += fold('pay', `Pay period <span class="meta">${periodLabel}</span>`, payFoldAmt, payPeriodHtml);
 
     // ---------- History ----------
     // The charts and past pay, in one section that starts closed.
@@ -4253,7 +4502,22 @@
     }
     const chartsShown = showOverviewHistory;
 
-    el.innerHTML = alertHtml + recapHtml + html;
+    const heroHtml = `
+      <div class="hero">
+        <div class="hero-top"><span>Free to spend each day</span><span>payday in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</span></div>
+        <div class="hero-num ${pay && free < 0 ? 'negative' : ''}">${pay ? formatMoney(free / daysLeft) : '—'}</div>
+        <div class="hero-sub">${pay
+          ? `${formatMoney(free)} ${free < 0 ? 'short' : 'left'} until ${paydayShort}`
+          : 'Enter this month\'s pay to see this'}</div>
+        ${splitHtml}
+      </div>`;
+    const needsHtml = needs.length
+      ? `<h3 class="section-title">Needs you</h3><div class="statement needs">${needs.join('')}</div>` : '';
+
+    el.innerHTML = alertHtml + heroHtml + recapHtml + needsHtml + html;
+    el.querySelectorAll('details.fold').forEach(d => d.addEventListener('toggle', () => {
+      if (d.open) overviewFolds.add(d.dataset.fold); else overviewFolds.delete(d.dataset.fold);
+    }));
     const dismissRecap = document.getElementById('dismissRecap');
     if (dismissRecap) dismissRecap.addEventListener('click', () => { recapDismissed = true; renderOverview(); });
     const historyToggle = document.getElementById('overviewHistoryToggle');

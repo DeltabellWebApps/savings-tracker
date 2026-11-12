@@ -291,10 +291,17 @@ function comingLayout(w, family, ctx) {
 }
 
 // ---------- Savings ----------
+// An allowance goal (one that resets on a cycle) is measured against this cycle, not its lifetime total: its
+// lifetime `saved` keeps climbing past the allowance every cycle, so it's never "done". Same rules as the website.
+const goalDone = g => !g.resetFrequency && isDone(g);
+const goalSaved = (L, g) => g.resetFrequency ? L.goalAllowance(g).used : g.saved;
+const goalPct = (L, g) => g.resetFrequency
+  ? Math.min(100, g.target > 0 ? (L.goalAllowance(g).used / g.target) * 100 : 0) : pctOf(g);
+
 // Goals not finished yet first, in the app's order.
 function sortedGoals(L) {
   const live = L.liveGoals();
-  return [...live.filter(g => !isDone(g)), ...live.filter(isDone)];
+  return [...live.filter(g => !goalDone(g)), ...live.filter(goalDone)];
 }
 
 // The ISA allowance is per person, so an ISA shows the total used across all of them (LedgerCore's isaAllowance).
@@ -312,15 +319,22 @@ function accountNote(a, info, L) {
 
 function goalLine(L, g) {
   const p = L.goalPlan(g);
+  const verb = g.straightOut ? 'paid' : 'saved';
+  if (g.resetFrequency) {
+    if (p.skip) return 'Skipped this month';
+    if (p.planned > 0 && p.savedThisPeriod >= p.planned) return `✓ ${money(p.savedThisPeriod)} ${verb} this month`;
+    const left = `${money(p.remaining)} left this cycle`;
+    return p.planned > 0 ? `${g.straightOut ? 'Pay' : 'Save'} ${money(p.planned)}/mo · ${left}` : left;
+  }
   if (p.overdue) return `Target date passed · ${money(p.remaining)} to go`;
-  if (p.skip && (g.resetFrequency || !isDone(g))) return 'Skipped this month';
-  if (p.planned > 0 && p.savedThisPeriod >= p.planned) return `✓ ${money(p.savedThisPeriod)} saved this month`;
+  if (p.skip && !isDone(g)) return 'Skipped this month';
+  if (p.planned > 0 && p.savedThisPeriod >= p.planned) return `✓ ${money(p.savedThisPeriod)} ${verb} this month`;
   if (p.projection) {
     // Same "chronic" callout as the website: behind for 3 pay periods running (this one included), not just today.
     const streak = p.projection.tone === 'behind' ? L.goalBehindStreak(g) : 0;
     return streak >= 3 ? `${p.projection.text} · ${streak} periods running` : p.projection.text;
   }
-  if (p.planned > 0) return `Save ${money(p.planned)}/mo`;
+  if (p.planned > 0) return `${g.straightOut ? 'Pay' : 'Save'} ${money(p.planned)}/mo`;
   return null;
 }
 
@@ -331,22 +345,23 @@ function savingsLayout(w, family, ctx) {
   // What goals hold now (pay outs and straight-out goals' money have left), and how far the ones with targets are.
   const inGoals = goals.reduce((t, g) => t + L.heldTotal(g), 0);
   const total = accounts.length ? accounts.reduce((t, x) => t + x.info.balance, 0) : inGoals;
-  const targets = goals.reduce((t, g) => t + g.target, 0);
-  const top = goals.find(g => g.target > 0 && !isDone(g)) || goals.find(g => g.target > 0) || goals[0];
-  const ofTarget = g => g.target > 0 ? `${money(g.saved)} of ${money(g.target)}` : `${money(g.saved)} so far`;
+  const targets = goals.filter(g => !g.resetFrequency).reduce((t, g) => t + g.target, 0);
+  const top = goals.find(g => g.target > 0 && !goalDone(g)) || goals.find(g => g.target > 0) || goals[0];
+  const ofTarget = g => g.target > 0
+    ? `${money(goalSaved(L, g))} of ${money(g.target)}${g.resetFrequency ? ' this cycle' : ''}` : `${money(g.saved)} so far`;
 
   if (!accounts.length && !goals.length) return messageWidget(w, family, 'No savings yet', 'Add a savings account or a goal in the app.');
 
   if (family === 'accessoryInline') {
-    w.addText(`${money(total)} saved${top ? ` · ${top.name} ${pctOf(top).toFixed(0)}%` : ''}`);
+    w.addText(`${money(total)} saved${top ? ` · ${top.name} ${goalPct(L, top).toFixed(0)}%` : ''}`);
   } else if (family === 'accessoryCircular') {
-    circular(w, top ? `${pctOf(top).toFixed(0)}%` : pounds(total), top ? top.name : 'saved');
+    circular(w, top ? `${goalPct(L, top).toFixed(0)}%` : pounds(total), top ? top.name : 'saved');
   } else if (family === 'accessoryRectangular') {
     addText(w, `${money(total)} saved`, Font.semiboldSystemFont(13), null, { scale: 0.7 });
     if (top) {
       addText(w, `${top.name} · ${ofTarget(top)}`, Font.regularSystemFont(11), null, { scale: 0.7 });
       w.addSpacer(4);
-      addBar(w, 140, pctOf(top), Color.white(), new Color('#ffffff', 0.3));
+      addBar(w, 140, goalPct(L, top), Color.white(), new Color('#ffffff', 0.3));
     }
   } else if (family === 'small') {
     addLabel(w, 'SAVINGS');
@@ -357,9 +372,9 @@ function savingsLayout(w, family, ctx) {
     if (top) {
       addText(w, top.name, Font.mediumSystemFont(13), C.ink);
       w.addSpacer(5);
-      addBar(w, 120, pctOf(top), isDone(top) ? C.done : C.gold);
+      addBar(w, 120, goalPct(L, top), goalDone(top) ? C.done : C.gold);
       w.addSpacer(4);
-      addText(w, `${pctOf(top).toFixed(0)}% · ${money(top.saved)}`, Font.regularMonospacedSystemFont(10), C.soft, { scale: 0.7 });
+      addText(w, `${goalPct(L, top).toFixed(0)}% · ${money(goalSaved(L, top))}`, Font.regularMonospacedSystemFont(10), C.soft, { scale: 0.7 });
     }
     w.addSpacer();
     if (ctx.saveScript) addText(w, 'Tap to add savings', Font.regularSystemFont(9), C.soft);
@@ -378,9 +393,9 @@ function savingsLayout(w, family, ctx) {
       w.addSpacer(accounts.length ? (large ? 14 : 8) : 0);
       goals.slice(0, goalMax).forEach((g, i) => {
         if (i > 0) w.addSpacer(large ? 10 : 6);
-        addBarRow(w, `${isDone(g) ? '✓ ' : ''}${g.name}`,
-          g.target > 0 ? (large ? `${money(g.saved)} / ${money(g.target)}` : `${pctOf(g).toFixed(0)}%`) : money(g.saved),
-          pctOf(g), 285, { compact: !large, color: isDone(g) ? C.done : C.gold, sub: large ? goalLine(L, g) : null });
+        addBarRow(w, `${goalDone(g) ? '✓ ' : ''}${g.name}`,
+          g.target > 0 ? (large ? `${money(goalSaved(L, g))} / ${money(g.target)}` : `${goalPct(L, g).toFixed(0)}%`) : money(g.saved),
+          goalPct(L, g), 285, { compact: !large, color: goalDone(g) ? C.done : C.gold, sub: large ? goalLine(L, g) : null });
       });
     }
     w.addSpacer();
