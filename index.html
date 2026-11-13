@@ -76,7 +76,7 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    margin-bottom: 6px;
+    margin-bottom: 10px;
   }
   h1 {
     font-family: 'Fraunces', serif;
@@ -89,16 +89,16 @@
   .sub {
     color: var(--ink-soft);
     font-size: 12.5px;
-    margin: 4px 0 20px;
+    margin: 8px 0 24px;
   }
   .totals {
     display: flex;
     gap: 24px;
-    padding: 16px 18px;
+    padding: 18px;
     background: var(--paper-raised);
     border: 1px solid var(--line);
     border-radius: 10px;
-    margin-bottom: 18px;
+    margin-bottom: 20px;
   }
   .totals .item .num {
     font-family: 'Fraunces', serif;
@@ -116,7 +116,7 @@
     gap: 8px;
     overflow-x: auto;
     padding-bottom: 4px;
-    margin-bottom: 18px;
+    margin-bottom: 20px;
   }
   .chip-row::-webkit-scrollbar { display: none; }
   .chip {
@@ -134,12 +134,12 @@
     border-color: var(--green-deep);
     color: var(--paper);
   }
-  .goal-list { display: flex; flex-direction: column; gap: 14px; }
+  .goal-list { display: flex; flex-direction: column; gap: 16px; }
   .goal {
     background: var(--paper-raised);
     border: 1px solid var(--line);
     border-radius: 10px;
-    padding: 18px 18px 16px;
+    padding: 20px 18px 18px;
     position: relative;
   }
   .goal.done { border-color: var(--gold); }
@@ -148,7 +148,7 @@
     justify-content: space-between;
     align-items: flex-start;
     gap: 10px;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
   .goal-name {
     font-family: 'Fraunces', serif;
@@ -462,15 +462,15 @@
     background: var(--paper-raised);
     border: 1px solid var(--line);
     border-radius: 10px;
-    padding: 4px 18px;
-    margin-bottom: 18px;
+    padding: 6px 18px;
+    margin-bottom: 20px;
   }
   .statement-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 12px;
-    padding: 11px 0;
+    padding: 13px 0;
     border-bottom: 1px solid var(--line);
     font-size: 13px;
   }
@@ -479,10 +479,10 @@
   .statement-row.total { font-weight: 600; }
   .statement-row.total .amt { font-size: 21px; }
   .statement-row .amt.negative, .statement-row .when.overdue { color: var(--danger); }
-  .statement-row .meta { display: block; font-size: 11px; color: var(--ink-soft); font-weight: 400; margin-top: 2px; }
+  .statement-row .meta { display: block; font-size: 11px; color: var(--ink-soft); font-weight: 400; margin-top: 3px; }
   .statement-row .row-end { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  .statement-empty { padding: 16px 0; font-size: 12.5px; color: var(--ink-soft); text-align: center; }
-  .balance-note { font-size: 11.5px; color: var(--ink-soft); padding: 11px 0; border-bottom: 1px solid var(--line); }
+  .statement-empty { padding: 18px 0; font-size: 12.5px; color: var(--ink-soft); text-align: center; }
+  .balance-note { font-size: 11.5px; color: var(--ink-soft); padding: 12px 0; border-bottom: 1px solid var(--line); }
   .balance-note:last-child { border-bottom: none; }
   .balance-note.warn { color: var(--danger); font-weight: 500; }
   .overview-alert {
@@ -506,7 +506,7 @@
     font-family: 'Fraunces', serif;
     font-size: 17px;
     font-weight: 500;
-    margin: 26px 0 10px;
+    margin: 30px 0 12px;
   }
   .month-head {
     display: flex;
@@ -523,10 +523,10 @@
   .projection-line.chronic { font-weight: 600; }
 
   /* Savings accounts */
-  .account-lines { margin: 2px 0 8px; }
-  .account-lines .statement-row { padding: 8px 0; }
+  .account-lines { margin: 4px 0 10px; }
+  .account-lines .statement-row { padding: 10px 0; }
   .account-lines .statement-row .amt { font-size: 15px; }
-  .account-note { font-size: 11px; color: var(--ink-soft); margin: 0 0 8px; }
+  .account-note { font-size: 11px; color: var(--ink-soft); margin: 0 0 10px; }
   .account-note.warn { color: var(--danger); font-weight: 500; }
   .account-note .bar-track { height: 5px; margin: 5px 0 0; }
   .field-check { display: flex; gap: 8px; align-items: center; text-transform: none; }
@@ -544,18 +544,19 @@
   }
   .drag-handle:focus-visible { outline: 2px solid var(--gold); }
   .goal-name .drag-handle { margin: -6px -4px -6px -10px; flex-shrink: 0; }
-  .goal.dragging {
+  .fold-head .drag-handle { margin: 0 2px 0 -10px; flex-shrink: 0; }
+  .goal.dragging, .fold.dragging {
     z-index: 5;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
     cursor: grabbing;
   }
-  .goal.shifting { transition: transform .15s ease; }
+  .goal.shifting, .fold.shifting { transition: transform .15s ease; }
+  .flag { color: var(--danger); margin-left: 4px; }
 
-  /* Two or three side-by-side choices, one picked (Goals / Accounts, a goal's kind and plan) */
+  /* Two or three side-by-side choices, one picked (a goal's kind and plan) */
   .switch { display: flex; gap: 3px; padding: 3px; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 9px; margin-bottom: 16px; }
   .switch button { flex: 1; padding: 7px 6px; border-radius: 6px; font-size: 12px; color: var(--ink-soft); }
   .switch button[aria-pressed="true"] { background: var(--line); color: var(--ink); font-weight: 500; }
-  .switch .flag { color: var(--danger); margin-left: 4px; }
 
   /* Goal cards: a status label, one line of figures and one button; the rest opens on a tap */
   .goal-card { cursor: pointer; padding: 14px 16px 12px; }
@@ -706,28 +707,31 @@
   .cat-row .bar-track { height: 6px; margin-bottom: 0; }
   .cat-row.active .cat-head { font-weight: 600; }
 
-  /* Overview: one big free-per-day figure with the spending bar under it */
-  .hero { margin: 4px 0 6px; }
+  /* Overview: this pay period's split, with the payday countdown above it */
+  .hero { margin: 6px 0 20px; }
   .hero-top { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: var(--ink-soft); }
-  .hero-num { font-family: 'Fraunces', serif; font-size: 46px; font-weight: 500; line-height: 1.1; margin: 4px 0 2px; letter-spacing: -0.01em; }
-  .hero-num.negative { color: var(--danger); }
-  .hero-sub { font-size: 12.5px; color: var(--ink-soft); }
+  .hero-sub { font-size: 12.5px; color: var(--ink-soft); margin-top: 6px; }
   .hero-split .split-bar { height: 10px; margin: 14px 0 8px; }
   .hero-key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: var(--ink-soft); }
   .hero-key .split-key { width: 8px; height: 8px; margin-right: 5px; vertical-align: 0; }
   .statement.needs { border-color: var(--danger); }
-  /* A section that's closed until tapped, with its key figure on the closed row */
-  .fold { padding: 0 18px; margin-bottom: 10px; }
-  .fold summary { display: flex; align-items: center; gap: 10px; padding: 13px 0; cursor: pointer; list-style: none; }
-  .fold summary::-webkit-details-marker { display: none; }
+  /* The Overview's cards: each can be dragged to reorder (see "Drag to reorder" above) and collapsed, with
+     its key figure left showing on the closed row. */
+  .card-list .fold { margin-bottom: 14px; }
+  .fold { padding: 0 18px; }
+  .fold-head { display: flex; align-items: center; }
+  .fold-toggle {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 14px 0;
+    cursor: pointer; text-align: left; color: inherit; font: inherit;
+  }
   .fold-title { font-family: 'Fraunces', serif; font-size: 16px; font-weight: 500; flex: 1; min-width: 0; }
   .fold-title .meta { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--ink-soft); font-weight: 400; margin-top: 2px; }
   .fold-amt { text-align: right; font-family: 'Fraunces', serif; font-size: 16px; white-space: nowrap; }
   .fold-amt .meta { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--ink-soft); }
   .fold-amt .negative { color: var(--danger); }
   .fold-chevron { font-size: 11px; color: var(--ink-soft); transition: transform .15s ease; }
-  .fold[open] .fold-chevron { transform: rotate(180deg); }
-  .fold-body { border-top: 1px solid var(--line); }
+  .fold-toggle[aria-expanded="true"] .fold-chevron { transform: rotate(180deg); }
+  .fold-body { border-top: 1px solid var(--line); padding-bottom: 4px; }
   /* Where the money goes: bills, goals and budgets as one stacked bar; the empty track is what's free. */
   .split { --s-bills: #4F62C4; --s-goals: #B8863B; --s-budgets: #A04E8C; }
   @media (prefers-color-scheme: dark) {
@@ -792,22 +796,13 @@
   <section class="view" id="goalsView">
     <p class="sub">What you're saving for, and how far you've come.</p>
 
-    <div class="switch" id="goalsSwitch" style="display:none;">
-      <button type="button" data-pane="goals" aria-pressed="true">Goals</button>
-      <button type="button" data-pane="accounts" aria-pressed="false">Accounts</button>
-    </div>
-    <div id="accountsPane" hidden>
-      <div id="accountList"></div>
-    </div>
-    <div id="goalsPane">
-      <div class="totals" id="totals"></div>
-      <input class="search-input" id="goalSearch" type="search" placeholder="Search goals" autocomplete="off" style="display:none;">
-      <div class="chip-row" id="categoryChips"></div>
-      <div class="goal-list" id="goalList"></div>
+    <div class="totals" id="totals"></div>
+    <input class="search-input" id="goalSearch" type="search" placeholder="Search goals" autocomplete="off" style="display:none;">
+    <div class="chip-row" id="categoryChips"></div>
+    <div class="goal-list" id="goalList"></div>
 
-      <button class="add-goal-btn" id="openAddGoal">+ New goal</button>
-      <div id="goalArchive"></div>
-    </div>
+    <button class="add-goal-btn" id="openAddGoal">+ New goal</button>
+    <div id="goalArchive"></div>
   </section>
 
   <section class="view" id="billsView">
@@ -1387,15 +1382,38 @@
   let billAmountHistory = []; // a bill's past amounts, oldest first, recorded whenever its amount is edited
   let billHistoryReady = false; // false until migration 009 has been run; price-change notes stay hidden until then
   const showArchived = { goals: false, bills: false, budgets: false, accounts: false };
-  // Which of the Overview's sections are open: bank balance, savings, pay period, and History (charts and past
-  // pay). All start closed; whatever you open or close is remembered on this device (`ledger.overviewOpen`).
+  // Which of the Overview's cards are open: coming up, budget pace, bank balance, savings accounts, pay period,
+  // and History (charts and past pay). Coming up and budget pace start open, the rest start closed; whatever
+  // you open or close is remembered on this device (`ledger.overviewOpen`).
   const OVERVIEW_OPEN_KEY = 'ledger.overviewOpen';
   const overviewFolds = new Set();
-  try { (JSON.parse(localStorage.getItem(OVERVIEW_OPEN_KEY)) || []).forEach(k => overviewFolds.add(k)); } catch (e) { /* storage blocked or bad value */ }
+  let storedOverviewOpen = null;
+  try { storedOverviewOpen = localStorage.getItem(OVERVIEW_OPEN_KEY); } catch (e) { /* storage blocked */ }
+  if (storedOverviewOpen === null) {
+    ['comingUp', 'budgetPace'].forEach(k => overviewFolds.add(k));
+  } else {
+    try { (JSON.parse(storedOverviewOpen) || []).forEach(k => overviewFolds.add(k)); } catch (e) { /* bad value */ }
+  }
   let showOverviewHistory = overviewFolds.has('history');
   function saveOverviewOpen() {
     if (showOverviewHistory) overviewFolds.add('history'); else overviewFolds.delete('history');
     try { localStorage.setItem(OVERVIEW_OPEN_KEY, JSON.stringify([...overviewFolds])); } catch (e) { /* storage blocked */ }
+  }
+
+  // The Overview's cards can be dragged into any order; remembered on this device (`ledger.overviewOrder`).
+  // A key missing from a saved order (new to this version, or not shown this render) is appended at the end.
+  const OVERVIEW_ORDER_KEY = 'ledger.overviewOrder';
+  const DEFAULT_OVERVIEW_ORDER = ['comingUp', 'budgetPace', 'balance', 'accounts', 'pay'];
+  let overviewOrder = DEFAULT_OVERVIEW_ORDER.slice();
+  try {
+    const stored = JSON.parse(localStorage.getItem(OVERVIEW_ORDER_KEY));
+    if (Array.isArray(stored) && stored.length) {
+      overviewOrder = stored.filter(k => DEFAULT_OVERVIEW_ORDER.includes(k));
+      DEFAULT_OVERVIEW_ORDER.forEach(k => { if (!overviewOrder.includes(k)) overviewOrder.push(k); });
+    }
+  } catch (e) { /* bad value */ }
+  function saveOverviewOrder() {
+    try { localStorage.setItem(OVERVIEW_ORDER_KEY, JSON.stringify(overviewOrder)); } catch (e) { /* storage blocked */ }
   }
   const RECAP_SEEN_KEY = 'ledger-recap-period-seen';
   let recapCard; // undefined until decided this session; null once decided there's nothing to show
@@ -1794,38 +1812,25 @@
   }
 
   // ---------- Main render ----------
-  // The Goals tab shows goals or savings accounts, one at a time. Which is remembered on this device. The
-  // switch only appears once the accounts tables exist; until then it's goals only.
-  let goalsPane = 'goals';
-  try { if (localStorage.getItem('ledger.goalsPane') === 'accounts') goalsPane = 'accounts'; } catch (e) { /* storage blocked */ }
-
-  function syncGoalsSwitch() {
-    const sw = document.getElementById('goalsSwitch');
-    const pane = accountsReady ? goalsPane : 'goals';
-    sw.style.display = accountsReady ? 'flex' : 'none';
-    document.getElementById('goalsPane').hidden = pane !== 'goals';
-    document.getElementById('accountsPane').hidden = pane !== 'accounts';
-    // Counts, and a mark on Accounts when something there needs a look (unassigned money, an allowance gone over).
-    const flag = !!document.querySelector('#accountList .warn');
-    sw.querySelector('[data-pane="goals"]').innerHTML = `Goals · ${liveGoals().length}`;
-    sw.querySelector('[data-pane="accounts"]').innerHTML =
-      `Accounts · ${accountsReady ? liveAccounts().length : 0}${flag ? '<span class="flag" aria-label="needs a look">●</span>' : ''}`;
-    sw.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.pane === pane));
+  // Savings accounts live in a card on the Overview (see renderOverview's 'accounts' card), which creates
+  // #accountList; renderAccounts() has to run right after it, every time, so the element isn't left empty.
+  function refreshAccountsFlag() {
+    // A mark on the card title when something in it needs a look (unassigned money, an allowance gone over).
+    const flagEl = document.getElementById('accountsFoldFlag');
+    if (flagEl) flagEl.hidden = !document.querySelector('#accountList .warn');
   }
-  document.querySelectorAll('#goalsSwitch button').forEach(b => b.addEventListener('click', () => {
-    goalsPane = b.dataset.pane;
-    try { localStorage.setItem('ledger.goalsPane', goalsPane); } catch (e) { /* storage blocked */ }
-    syncGoalsSwitch();
-  }));
+  function renderOverviewAndAccounts() {
+    renderOverview();
+    renderAccounts();
+    refreshAccountsFlag();
+  }
 
   function render() {
     indexPayments();
-    renderAccounts();
+    renderOverviewAndAccounts();
     renderGoals();
-    syncGoalsSwitch();
     renderBills();
     renderBudgets();
-    renderOverview();
   }
 
   // Goal cards whose details are open. Kept across renders, not across reloads.
@@ -2174,6 +2179,15 @@
 
     if (anyInterest && outsideIsaInterest > 0) {
       html += `<div class="account-note" style="margin-top: 10px;">Interest outside ISAs this tax year: ${formatMoney(outsideIsaInterest)} of the ${formatMoney(PERSONAL_SAVINGS_ALLOWANCE)} you can earn tax-free as a basic-rate taxpayer (£500 at higher rate).</div>`;
+    }
+    // Goal money kept in the current account rather than moved to a savings account.
+    const heldInCurrent = L.heldInCurrent();
+    if (heldInCurrent > 0.005) {
+      html += `
+        <div class="statement" style="margin-top: 14px;"><div class="statement-row">
+          <div>Set aside in current account<span class="meta">for goals kept there, not a savings account</span></div>
+          <div class="amt" style="color: var(--ink-soft);">${formatMoney(heldInCurrent)}</div>
+        </div></div>`;
     }
     html += `<button class="add-goal-btn" id="openAddAccount">+ Savings account</button><div id="accountArchive"></div>`;
     el.innerHTML = html;
@@ -2723,6 +2737,70 @@
       render();
       showToast("Couldn't reorder — check your connection");
     }
+  }
+
+  // Drag one of the Overview's cards by its handle; same mechanics as startGoalDrag, over `.fold` cards
+  // instead of `.goal` ones. Dropping calls reorderOverviewCards, which re-renders the Overview.
+  function startOverviewDrag(e, handle, list, keys) {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    const cardEls = [...list.querySelectorAll('.fold')];
+    const card = handle.closest('.fold');
+    const from = cardEls.indexOf(card);
+    const rects = cardEls.map(c => c.getBoundingClientRect());
+    const gap = cardEls.length > 1 ? rects[1].top - rects[0].bottom : 14;
+    const shift = rects[from].height + gap;
+    const startY = e.clientY;
+    let to = from;
+
+    handle.setPointerCapture(e.pointerId);
+    card.classList.add('dragging');
+    cardEls.forEach(c => { if (c !== card) c.classList.add('shifting'); });
+
+    function onMove(ev) {
+      const dy = ev.clientY - startY;
+      card.style.transform = `translateY(${dy}px)`;
+      const center = rects[from].top + rects[from].height / 2 + dy;
+      to = from;
+      for (let i = 0; i < cardEls.length; i++) {
+        if (i === from) continue;
+        const mid = rects[i].top + rects[i].height / 2;
+        if (i > from && center > mid) to = i;
+        if (i < from && center < mid && to === from) to = i;
+      }
+      cardEls.forEach((c, i) => {
+        if (i === from) return;
+        let y = 0;
+        if (from < to && i > from && i <= to) y = -shift;
+        if (to < from && i >= to && i < from) y = shift;
+        c.style.transform = y ? `translateY(${y}px)` : '';
+      });
+    }
+
+    function onUp() {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      cardEls.forEach(c => { c.style.transform = ''; c.classList.remove('dragging', 'shifting'); });
+      if (to !== from) reorderOverviewCards(keys, from, to);
+    }
+
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+  }
+
+  // Moves keys[from] to position `to`. `keys` is this render's visible cards, in their current order — a
+  // subset of `overviewOrder` when a card (budget pace, savings accounts) isn't shown this time. Those stay
+  // put, tacked on the end in whatever order they already had.
+  function reorderOverviewCards(keys, from, to) {
+    const next = keys.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    const shown = new Set(keys);
+    overviewOrder = next.concat(overviewOrder.filter(k => !shown.has(k)));
+    saveOverviewOrder();
+    renderOverviewAndAccounts();
   }
 
   // ---------- Category datalist ----------
@@ -4059,12 +4137,12 @@
     const accountInfos = sum.accounts.map(x => ({ a: x.account, info: x.info }));
     const savingsTotal = accountInfos.reduce((s, x) => s + x.info.balance, 0);
     const inGoalsTotal = accountInfos.reduce((s, x) => s + x.info.inGoals, 0);
-    const heldInCurrent = L.heldInCurrent();
 
-    // Bills this pay period: what's still to pay, and how many are overdue.
+    // Bills this pay period: what's still to pay, and how many are overdue. Runs through payday itself, same
+    // window as L.comingUp(), so a bill dated on payday still counts as "before payday".
     let billsLeft = 0, billsOverdue = 0;
     billsOnly.forEach(b => {
-      occurrencesBetween(b, period.start, period.end).forEach(d => {
+      occurrencesBetween(b, period.start, period.nextPayday).forEach(d => {
         if (paymentFor(b, d) || d < trackFrom(b)) return;
         billsLeft += b.amount;
         if (d < today) billsOverdue++;
@@ -4072,18 +4150,15 @@
     });
 
     // The page is built from separate pieces, put together at the end:
-    //   hero      — free per day, with the spending bar
-    //   needs     — anything waiting on you: overdue items, pay or a balance to enter
-    //   coming up, budget pace — always shown
-    //   folds     — bank balance, savings and the pay period breakdown, each closed until tapped (remembered
-    //               across renders in `overviewFolds`), with its key figure on the closed row
-    //   history   — charts and past pay, behind their own toggle
+    //   alert, recap — a prominent banner and a one-time pay-period recap, fixed above everything else
+    //   needs        — anything waiting on you: overdue items, pay or a balance to enter
+    //   cards        — coming up, budget pace, bank balance, savings accounts and the pay period breakdown,
+    //                  each its own card: collapsible (remembered in `overviewFolds`, with its key figure
+    //                  shown closed) and draggable into any order (remembered in `overviewOrder`)
+    //   history      — charts and past pay, behind their own toggle
     const needs = [];
-    const fold = (key, title, amtHtml, body) => body ? `
-      <details class="statement fold" data-fold="${key}" ${overviewFolds.has(key) ? 'open' : ''}>
-        <summary><span class="fold-title">${title}</span><span class="fold-amt">${amtHtml}</span><span class="fold-chevron" aria-hidden="true">▾</span></summary>
-        <div class="fold-body">${body}</div>
-      </details>` : '';
+    const cards = {}; // key -> { title, amt, body }, filled in by fold() below
+    const fold = (key, title, amtHtml, body) => { if (body) cards[key] = { title, amt: amtHtml, body }; };
     if (!pay) needs.push(`
       <div class="statement-row">
         <div>Pay<span class="meta">not entered for ${shortDate(period.start)} yet</span></div>
@@ -4185,46 +4260,22 @@
             </div>`;
         }
       }
+      // The current account plus every savings account, so the full picture is in one place.
+      if (accountInfos.length) {
+        html += `
+          <div class="statement-row total">
+            <div>Total<span class="meta">current account ${Math.abs(currentNow - latestBalance.amount) < 0.005 ? '' : 'estimated now '}plus savings</span></div>
+            <div class="amt ${neg(currentNow + savingsTotal)}">${formatMoney(currentNow + savingsTotal)}</div>
+          </div>`;
+      }
     }
     const balanceHtml = html.slice(balanceStart);
     html = html.slice(0, balanceStart);
 
-    // Savings: each account's balance, how much of it is for goals and how much isn't, then the total across
-    // everything, so the whole picture is in one place. Goal money set aside in the current account gets a line too.
-    let savingsHtml = '', savingsFoldAmt = '';
-    if (accountInfos.length) {
-      const savingsStart = html.length;
-      html += accountInfos.map(({ a, info }) => {
-        const split = [
-          info.inGoals > 0.005 ? `${formatMoney(info.inGoals)} for goals` : '',
-          Math.abs(info.unassigned) >= 0.005 ? `${formatMoney(info.unassigned)} unassigned` : ''
-        ].filter(Boolean).join(' · ') || 'nothing for goals yet';
-        return `
-        <div class="statement-row">
-          <div>${escapeHtml(a.name)}<span class="meta">${split} · ${info.latestEntry ? `balance entered ${daysAgo(info.latestEntry.createdAt)}` : 'no balance entered yet'}</span></div>
-          <div class="amt ${neg(info.balance)}">${formatMoney(info.balance)}</div>
-        </div>`;
-      }).join('');
-      if (heldInCurrent > 0.005) {
-        html += `
-        <div class="statement-row">
-          <div>Set aside in current account<span class="meta">for goals kept there, not a savings account</span></div>
-          <div class="amt" style="color: var(--ink-soft);">${formatMoney(heldInCurrent)}</div>
-        </div>`;
-      }
-      html += currentNow === null
-        ? `<div class="statement-row total">
-            <div>Total in savings<span class="meta">add your current account balance to include it</span></div>
-            <div class="amt ${neg(savingsTotal)}">${formatMoney(savingsTotal)}</div>
-          </div>`
-        : `<div class="statement-row total">
-            <div>Total<span class="meta">current account ${Math.abs(currentNow - latestBalance.amount) < 0.005 ? '' : 'estimated now '}plus savings</span></div>
-            <div class="amt ${neg(currentNow + savingsTotal)}">${formatMoney(currentNow + savingsTotal)}</div>
-          </div>`;
-      savingsHtml = html.slice(savingsStart);
-      html = html.slice(0, savingsStart);
-      savingsFoldAmt = `${formatMoney(savingsTotal)}<span class="meta">${formatMoney(inGoalsTotal)} for goals</span>`;
-    }
+    // Savings accounts: the full management card (renderAccounts, into #accountList) lives here, with the
+    // total across accounts as the closed-row figure.
+    const accountsFoldAmt = accountInfos.length
+      ? `${formatMoney(savingsTotal)}<span class="meta">${formatMoney(inGoalsTotal)} for goals</span>` : '';
 
     // Other income sits under pay: one row per source. Sources due this period count towards left over;
     // the rest stay listed (greyed, not counted) so they can still be edited, with the add button last.
@@ -4311,7 +4362,7 @@
       { key: 'budgets', name: 'Budgets', value: budgetsCommitted }
     ].filter(p => p.value > 0);
     const outgoing = parts.reduce((s, p) => s + p.value, 0);
-    // Drawn in the hero, under the free-per-day figure: a bar plus a one-line key. Tap a part for its figures.
+    // Drawn in the hero: a bar plus a one-line key. Tap a part for its figures.
     let splitTips = [], splitHtml = '';
     if (income > 0 && outgoing > 0) {
       const whole = Math.max(income, outgoing);
@@ -4322,12 +4373,12 @@
       const pounds = v => formatMoney(Math.round(v));
       splitHtml = `
         <div class="split chart hero-split">
-          <div class="split-bar" role="img" aria-label="${parts.map(p => `${p.name} ${share(p.value)}`).join(', ')}, free ${share(Math.max(0, free))}">
+          <div class="split-bar" role="img" aria-label="${parts.map(p => `${p.name} ${share(p.value)}`).join(', ')}, left over ${share(Math.max(0, free))}">
             ${parts.map((p, i) => `<div class="seg" data-i="${i}" style="width:${(p.value / whole) * 100}%; background: var(--s-${p.key});"></div>`).join('')}
           </div>
           <div class="hero-key">
             ${parts.map(p => `<span><span class="split-key" style="background: var(--s-${p.key});"></span>${p.name.toLowerCase()} ${pounds(p.value)}</span>`).join('')}
-            <span><span class="split-key free"></span>${free < 0 ? 'over by' : 'free'} ${pounds(Math.abs(free))}</span>
+            <span><span class="split-key free"></span>${free < 0 ? 'over by' : 'left over'} ${pounds(Math.abs(free))}</span>
           </div>
         </div>`;
       splitTips = parts.map(tip);
@@ -4336,7 +4387,6 @@
     // ---------- Budget pace ----------
     // Spending across all budgets against an even spread over the pay period; the tick marks today.
     const budgetTotal = liveBudgets().reduce((s, b) => s + b.amount, 0);
-    const paceStart = html.length;
     if (budgetTotal > 0) {
       const periodDays = Math.round((period.nextPayday - period.start) / 86400000);
       const dayNum = Math.round((today - period.start) / 86400000) + 1;
@@ -4348,17 +4398,14 @@
       else if (diff > Math.max(1, budgetTotal * 0.05)) note = `<span style="color: var(--danger)">${formatMoney(diff)} ahead of an even pace.</span>`;
       else if (diff < -Math.max(1, budgetTotal * 0.05)) note = `${formatMoney(-diff)} under an even pace.`;
       else note = 'Right on an even pace.';
-      html += `
-        <h3 class="section-title">Budget pace</h3>
-        <div class="statement">
-          <div class="month-head"><span>${formatMoney(budgetsSpent)} spent</span><span class="amt">of ${formatMoney(budgetTotal)}</span></div>
-          <div class="pace">
-            <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-            <div class="pace-mark" style="left: calc(${(dayNum / periodDays) * 100}% - 1px);" title="Today"></div>
-          </div>
-          <div class="bill-due" style="padding: 10px 0 14px;">${note} The tick is today, day ${dayNum} of ${periodDays}.</div>
+      fold('budgetPace', 'Budget pace', `${formatMoney(budgetsSpent)}<span class="meta">of ${formatMoney(budgetTotal)}</span>`, `
+        <div class="month-head"><span>${formatMoney(budgetsSpent)} spent</span><span class="amt">of ${formatMoney(budgetTotal)}</span></div>
+        <div class="pace">
+          <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+          <div class="pace-mark" style="left: calc(${(dayNum / periodDays) * 100}% - 1px);" title="Today"></div>
         </div>
-      `;
+        <div class="bill-due" style="padding: 10px 0 14px;">${note} The tick is today, day ${dayNum} of ${periodDays}.</div>
+      `);
     }
 
     // ---------- Coming up in this period ----------
@@ -4367,9 +4414,6 @@
       b: { id: i.id, name: i.name, amount: i.amount }, d: i.date, isIncome: i.kind === 'income', isStanding: i.kind === 'standing',
       isGoal: i.kind === 'goal'
     }));
-
-    const budgetPaceHtml = html.slice(paceStart);
-    html = html.slice(0, paceStart);
 
     // Overdue items go to "Needs you" at the top; the rest are listed here.
     const itemRow = ({ b, d, isIncome, isStanding, isGoal }) => {
@@ -4394,15 +4438,16 @@
     const isOverdue = i => !i.isIncome && i.d < today;
     needs.unshift(...items.filter(isOverdue).map(itemRow));
     const upcoming = items.filter(i => !isOverdue(i));
-    html += `<h3 class="section-title">Coming up <span style="color: var(--ink-soft); font-weight: 400; font-size: 13px;">${billsLeft > 0.005 ? `${formatMoney(billsLeft)} of bills before payday` : `next payday ${shortDate(period.nextPayday)}`}</span></h3><div class="statement">`;
-    html += upcoming.length === 0
+    const comingAmt = billsLeft > 0.005
+      ? `${formatMoney(billsLeft)}<span class="meta">before payday</span>`
+      : `<span class="meta">next payday ${shortDate(period.nextPayday)}</span>`;
+    fold('comingUp', 'Coming up', comingAmt, upcoming.length === 0
       ? `<div class="statement-empty">${needs.length ? 'Nothing else' : 'Nothing'} left to pay this period.</div>`
-      : upcoming.map(itemRow).join('');
-    html += '</div>';
-    html += budgetPaceHtml;
-    html += fold('balance', 'Bank balance', balanceFoldAmt, balanceHtml);
-    html += fold('savings', 'Savings', savingsFoldAmt, savingsHtml);
-    html += fold('pay', `Pay period <span class="meta">${periodLabel}</span>`, payFoldAmt, payPeriodHtml);
+      : upcoming.map(itemRow).join(''));
+    fold('balance', 'Bank balance', balanceFoldAmt, balanceHtml);
+    fold('accounts', 'Savings accounts<span class="flag" id="accountsFoldFlag" aria-label="needs a look" hidden>●</span>', accountsFoldAmt,
+      accountsReady ? '<div id="accountList"></div>' : '');
+    fold('pay', `Pay period <span class="meta">${periodLabel}</span>`, payFoldAmt, payPeriodHtml);
 
     // ---------- History ----------
     // The charts and past pay, in one section that starts closed.
@@ -4510,27 +4555,67 @@
     }
     const chartsShown = showOverviewHistory;
 
-    const heroHtml = `
+    // This period's bills/savings/budgets split, with the payday countdown above it. Nothing to show it with
+    // (no pay entered, nothing to split) still gets the countdown, just without the bar.
+    const heroHtml = splitHtml || !pay ? `
       <div class="hero">
-        <div class="hero-top"><span>Free to spend each day</span><span>payday in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</span></div>
-        <div class="hero-num ${pay && free < 0 ? 'negative' : ''}">${pay ? formatMoney(free / daysLeft) : '—'}</div>
-        <div class="hero-sub">${pay
-          ? `${formatMoney(free)} ${free < 0 ? 'short' : 'left'} until ${paydayShort}`
-          : 'Enter this month\'s pay to see this'}</div>
-        ${splitHtml}
-      </div>`;
+        <div class="hero-top"><span>This pay period</span><span>payday in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</span></div>
+        ${splitHtml || `<div class="hero-sub">Enter this month's pay to see where it's going</div>`}
+      </div>` : '';
     const needsHtml = needs.length
       ? `<h3 class="section-title">Needs you</h3><div class="statement needs">${needs.join('')}</div>` : '';
 
-    el.innerHTML = alertHtml + heroHtml + recapHtml + needsHtml + html;
-    el.querySelectorAll('details.fold').forEach(d => d.addEventListener('toggle', () => {
-      if (d.open) overviewFolds.add(d.dataset.fold); else overviewFolds.delete(d.dataset.fold);
+    // The cards below, in the order remembered on this device (`overviewOrder`); one missing this render
+    // (budget pace with no budgets, savings accounts before the migration's run) is just left out, not shown
+    // as an empty card. Each can be dragged to a new spot — once there's more than one to move — and
+    // collapsed, with its key figure left showing on the closed row (remembered in `overviewFolds`).
+    const activeKeys = overviewOrder.filter(k => cards[k]);
+    const draggable = activeKeys.length > 1;
+    const CARD_LABELS = { comingUp: 'Coming up', budgetPace: 'Budget pace', balance: 'Bank balance', accounts: 'Savings accounts', pay: 'Pay period' };
+    const cardsHtml = activeKeys.map(key => {
+      const { title, amt, body } = cards[key];
+      const open = overviewFolds.has(key);
+      return `
+        <div class="statement fold" data-fold="${key}">
+          <div class="fold-head">
+            ${draggable ? `<button class="drag-handle" data-key="${key}" aria-label="Reorder ${CARD_LABELS[key]} — drag, or use the arrow keys">⠿</button>` : ''}
+            <button class="fold-toggle" data-key="${key}" aria-expanded="${open}" aria-controls="fold-body-${key}">
+              <span class="fold-title">${title}</span>
+              <span class="fold-amt">${amt}</span>
+              <span class="fold-chevron" aria-hidden="true">▾</span>
+            </button>
+          </div>
+          <div class="fold-body" id="fold-body-${key}" ${open ? '' : 'hidden'}>${body}</div>
+        </div>`;
+    }).join('');
+
+    el.innerHTML = alertHtml + heroHtml + recapHtml + needsHtml + `<div class="card-list" id="overviewCards">${cardsHtml}</div>` + html;
+    el.querySelectorAll('.fold-toggle').forEach(btn => btn.addEventListener('click', () => {
+      const key = btn.dataset.key;
+      if (overviewFolds.has(key)) overviewFolds.delete(key); else overviewFolds.add(key);
       saveOverviewOpen();
+      btn.setAttribute('aria-expanded', overviewFolds.has(key));
+      document.getElementById(`fold-body-${key}`).hidden = !overviewFolds.has(key);
     }));
+    const overviewCardList = document.getElementById('overviewCards');
+    overviewCardList.querySelectorAll('.drag-handle').forEach(handle => {
+      handle.addEventListener('pointerdown', e => startOverviewDrag(e, handle, overviewCardList, activeKeys));
+      handle.addEventListener('keydown', e => {
+        const dir = { ArrowUp: -1, ArrowDown: 1 }[e.key];
+        if (!dir) return;
+        e.preventDefault();
+        const from = activeKeys.indexOf(handle.dataset.key);
+        const to = from + dir;
+        if (to < 0 || to >= activeKeys.length) return;
+        reorderOverviewCards(activeKeys, from, to);
+        const moved = document.querySelector(`.drag-handle[data-key="${handle.dataset.key}"]`);
+        if (moved) moved.focus();
+      });
+    });
     const dismissRecap = document.getElementById('dismissRecap');
-    if (dismissRecap) dismissRecap.addEventListener('click', () => { recapDismissed = true; renderOverview(); });
+    if (dismissRecap) dismissRecap.addEventListener('click', () => { recapDismissed = true; renderOverviewAndAccounts(); });
     const historyToggle = document.getElementById('overviewHistoryToggle');
-    if (historyToggle) historyToggle.addEventListener('click', () => { showOverviewHistory = !showOverviewHistory; saveOverviewOpen(); renderOverview(); });
+    if (historyToggle) historyToggle.addEventListener('click', () => { showOverviewHistory = !showOverviewHistory; saveOverviewOpen(); renderOverviewAndAccounts(); });
     el.querySelectorAll('.split-bar .seg').forEach(seg => {
       const show = () => {
         const r = seg.getBoundingClientRect();

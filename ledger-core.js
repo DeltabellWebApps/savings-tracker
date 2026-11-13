@@ -843,27 +843,29 @@
     };
 
     // What's still to go out this pay period, soonest first: unpaid bills (overdue ones included) and standing
-    // orders not marked done. Income still to come in is included with `income: true`.
+    // orders not marked done. Income still to come in is included with `income: true`. The window runs through
+    // payday itself, not just the day before — a bill dated on payday still reads as "before you're paid".
     L.comingUp = () => {
       const today = startOfToday();
       const period = currentPayPeriod();
+      const through = period.nextPayday;
       const items = [];
       data.bills.filter(b => !b.archived).forEach(b => {
         if (b.kind === 'bill') {
-          L.unpaidBetween(b, period.start, period.end).filter(d => d >= trackFrom(b))
+          L.unpaidBetween(b, period.start, through).filter(d => d >= trackFrom(b))
             .forEach(d => items.push({ kind: 'bill', id: b.id, name: b.name, amount: b.amount, date: d }));
         } else if (!isPay(b)) {
-          occurrencesBetween(b, today, period.end)
+          occurrencesBetween(b, today, through)
             .forEach(d => items.push({ kind: 'income', id: b.id, name: b.name, amount: b.amount, date: d }));
         }
       });
-      L.liveAccounts().forEach(a => L.standingBetween(a, period.start, period.end).filter(d => !L.standingDone(a, d))
+      L.liveAccounts().forEach(a => L.standingBetween(a, period.start, through).filter(d => !L.standingDone(a, d))
         .forEach(d => items.push({ kind: 'standing', id: a.id, name: `${a.name} standing order`, amount: a.standingAmount, date: d })));
       // Goals with a day of the month: what this period's plan still wants, on that day.
       L.liveGoals().filter(g => g.monthlyDay).forEach(g => {
         const plan = L.goalPlan(g);
         const left = plan.skip ? 0 : plan.planned - Math.max(0, plan.savedThisPeriod);
-        const day = goalDaysBetween(g, period.start, period.end)[0];
+        const day = goalDaysBetween(g, period.start, through)[0];
         if (left > 0.005 && day) items.push({ kind: 'goal', id: g.id, name: g.name, amount: left, date: day });
       });
       return items.sort((x, y) => x.date - y.date);
