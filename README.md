@@ -9,7 +9,7 @@ Live at <https://deltabellwebapps.github.io/savings-tracker/>.
 
 | Path | What it is |
 |---|---|
-| `index.html` | The whole web app: markup, styles and script. Four tabs: Overview, Goals, Bills, Income. |
+| `index.html` | The whole web app: markup, styles and script. Four tabs: Overview, Goals, Bills, Potential. |
 | `ledger-core.js` | The app's core rules: dates, bill schedules, pay periods, the yearly bills pot, money formatting, goal plans and projections, savings account balances, interest and allowances. The app needs it to load. |
 | `supabase/` | SQL migrations, run by hand in the Supabase SQL editor. |
 | `widget/` | iPhone widgets and a quick spend script for [Scriptable](https://scriptable.app). See "Phone widgets" below. |
@@ -93,13 +93,13 @@ There's no build step. GitHub Pages serves the files as they are.
 - **Budgets** are monthly allowances (e.g. Groceries £300). They reset each payday, and spends are logged against
   them. The Budgets tab charts spending per pay period over the last six (all budgets, or one you tap), and each
   budget's average over the finished ones against its allowance. Past periods use today's allowances.
-  **Not reachable from the nav as of 13 Nov 2026** — the Income tab took its slot, since budgets weren't being
-  used. The code, the sheet and any budgets already made are all still there, just not linked to from
+  **Not reachable from the nav as of 13 Nov 2026** — the Potential tab took its slot, since budgets weren't
+  being used. The code, the sheet and any budgets already made are all still there, just not linked to from
   anywhere; `budgetsView` in `index.html` and the Overview's `fold('budgetPace', ...)` (removed, not just
   hidden) are the two places to restore if budgets come back.
-- **Potential income** is a plain reference list on the Income tab — a name, an amount and the date you expect
-  it — for income you're not counting on yet (some freelance work, a bonus). It's never counted in any pay
-  period total, Coming up, or the "where the money goes" split; it's just a list with its own total. Needs
+- **Potential income** is a plain reference list on the Potential tab — a name, an amount and the date you
+  expect it — for income you're not counting on yet (some freelance work, a bonus). It's never counted in any
+  pay period total, Coming up, or the "where the money goes" split; it's just a list with its own total. Needs
   migration 010 (`potential_income`); see `renderIncome()` in `index.html`.
 - **Overview.** From the top: an alert banner if the balance forecast would go overdrawn; a dismissible recap
   of the pay period that just finished (see below); **Needs you** (overdue bills, standing orders and goal
@@ -199,8 +199,8 @@ Deploy the matching app code only *after* running the migration.
 - `008_goal_reset_allowance.sql` adds `goals.reset_frequency` and `goals.reset_start`, for a periodic-reset goal.
 - `009_bill_amount_history.sql` creates `bill_amount_history`. Until it's run the app works as before, with no
   "was £X until DATE" note on a bill that's had its amount changed.
-- `010_potential_income.sql` creates `potential_income`, for the Income tab (13 Nov 2026 release — it replaced
-  Budgets in the nav). Until it's run the tab is empty with nothing to add; nothing else depends on it.
+- `010_potential_income.sql` creates `potential_income`, for the Potential tab (13 Nov 2026 release — it
+  replaced Budgets in the nav). Until it's run the tab is empty with nothing to add; nothing else depends on it.
 
 The SQL files for 001–006 were lost. Only 001 survives, in the GitHub history (deleted on 4 Oct 2026). For a
 record of the schema they built, see the export from 9 Nov 2026 in `supabase/`:
