@@ -818,6 +818,8 @@
     <div id="billTrends"></div>
   </section>
 
+  <!-- Not reachable from the nav any more (see the Income tab below) — kept so the budgets you already have,
+       and the code that runs them, aren't lost if you want them back. -->
   <section class="view" id="budgetsView">
     <p class="sub">What you allow yourself each month, and what's gone.</p>
 
@@ -830,12 +832,22 @@
     <div id="budgetTrends"></div>
   </section>
 
+  <section class="view" id="incomeView">
+    <p class="sub">Income you might get, and when.</p>
+
+    <div class="totals" id="incomeTotals"></div>
+    <div class="goal-list" id="incomeList"></div>
+
+    <button class="add-goal-btn" id="openAddPotentialIncome">+ New potential income</button>
+    <div id="incomeArchive"></div>
+  </section>
+
   <nav class="tabbar">
     <div class="tabbar-inner">
       <a class="tab" href="#overview" data-view="overview">Overview</a>
       <a class="tab" href="#goals" data-view="goals">Goals</a>
       <a class="tab" href="#bills" data-view="bills">Bills</a>
-      <a class="tab" href="#budgets" data-view="budgets">Budgets</a>
+      <a class="tab" href="#income" data-view="income">Income</a>
     </div>
   </nav>
 </div>
@@ -936,6 +948,34 @@
     <div class="sheet-actions sheet-danger" id="deleteBudgetRow" style="display:none;">
       <button class="btn-secondary" id="archiveBudget">Archive budget</button>
       <button class="btn-delete" id="deleteBudget">Delete this budget</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Potential income Sheet -->
+<div class="overlay" id="incomeOverlay">
+  <div class="sheet">
+    <h2 id="incomeSheetTitle">New potential income</h2>
+    <div class="field">
+      <label for="incomeNameInput">What's it for?</label>
+      <input id="incomeNameInput" type="text" placeholder="e.g. Freelance invoice" maxlength="60">
+    </div>
+    <div class="field">
+      <label for="incomeAmountInput">Amount</label>
+      <input id="incomeAmountInput" type="number" inputmode="decimal" placeholder="0" min="0" step="0.01">
+    </div>
+    <div class="field">
+      <label for="incomeDateInput">Expected date</label>
+      <input id="incomeDateInput" type="date">
+      <div class="field-hint">Just for reference — it isn't counted in any pay period total until it's actually in.</div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="cancelIncome">Cancel</button>
+      <button class="btn-primary" id="saveIncome">Save</button>
+    </div>
+    <div class="sheet-actions sheet-danger" id="deleteIncomeRow" style="display:none;">
+      <button class="btn-secondary" id="archiveIncome">Archive</button>
+      <button class="btn-delete" id="deleteIncome">Delete this entry</button>
     </div>
   </div>
 </div>
@@ -1381,7 +1421,10 @@
   let accountsReady = false; // false until migration 003 has been run; accounts stay hidden until then
   let billAmountHistory = []; // a bill's past amounts, oldest first, recorded whenever its amount is edited
   let billHistoryReady = false; // false until migration 009 has been run; price-change notes stay hidden until then
-  const showArchived = { goals: false, bills: false, budgets: false, accounts: false };
+  let potentialIncome = []; // speculative income, not counted in any pay period total — see the Income tab
+  let incomeReady = false; // false until migration 010 has been run
+  let editingIncomeId = null;
+  const showArchived = { goals: false, bills: false, budgets: false, accounts: false, potential_income: false };
   // Which of the Overview's cards are open: coming up, budget pace, bank balance, savings accounts, pay period,
   // and History (charts and past pay). Coming up and budget pace start open, the rest start closed; whatever
   // you open or close is remembered on this device (`ledger.overviewOpen`).
@@ -1447,6 +1490,12 @@
   const { hasTarget } = LedgerCore;
   const { isPay, PAY_TAG } = LedgerCore;
 
+  // Potential income isn't a ledger rule — it's not shared with the widget or counted in any total — so its
+  // row mapping lives here rather than in ledger-core.js.
+  function fromIncomeRow(r) {
+    return { id: r.id, name: r.name, amount: Number(r.amount), expectedDate: r.expected_date, archived: r.archived, createdAt: r.created_at };
+  }
+
   // ---------- Loading ----------
   // Supabase hands back at most 1,000 rows per request (the project's "Max rows" setting), so lists are fetched a
   // page at a time until a short page comes back. `query` builds a fresh query each time, ordered down to `id` so
@@ -1483,7 +1532,7 @@
     const optional = p => p.catch(e => { if (isMissingTable(e)) return null; throw e; });
     let r;
     try {
-      const [g, d, b, p, bu, s, ba, a, ae, t, bah] = await Promise.all([
+      const [g, d, b, p, bu, s, ba, a, ae, t, bah, pi] = await Promise.all([
         fetchAll(() => sb.from('goals').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('id')),
         fetchAll(() => sb.from('deposits').select('*').order('created_at', { ascending: true }).order('id')),
         fetchAll(() => sb.from('bills').select('*').order('created_at', { ascending: true }).order('id')),
@@ -1494,9 +1543,10 @@
         optional(fetchAll(() => sb.from('accounts').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }).order('id'))),
         optional(fetchAll(() => sb.from('account_balances').select('*').order('created_at', { ascending: true }).order('id'))),
         optional(fetchAll(() => sb.from('transfers').select('*').order('moved_on', { ascending: true }).order('id'))),
-        optional(fetchAll(() => sb.from('bill_amount_history').select('*').order('created_at', { ascending: true }).order('id')))
+        optional(fetchAll(() => sb.from('bill_amount_history').select('*').order('created_at', { ascending: true }).order('id'))),
+        optional(fetchAll(() => sb.from('potential_income').select('*').order('expected_date', { ascending: true }).order('id')))
       ]);
-      r = { g, d, b, p, bu, s, ba, a, ae, t, bah };
+      r = { g, d, b, p, bu, s, ba, a, ae, t, bah, pi };
     } catch (e) {
       return false;
     }
@@ -1517,6 +1567,8 @@
     transfers = accountsReady ? r.t.map(fromTransferRow) : [];
     billHistoryReady = r.bah !== null;
     billAmountHistory = billHistoryReady ? r.bah.map(h => ({ id: h.id, billId: h.bill_id, amount: Number(h.amount), createdAt: h.created_at })) : [];
+    incomeReady = r.pi !== null;
+    potentialIncome = incomeReady ? r.pi.map(fromIncomeRow) : [];
     loadedAt = Date.now();
     loadedDay = toISODate(startOfToday());
     return true;
@@ -1736,10 +1788,10 @@
 
   // Archived items drop out of every list, total and chart, but keep their history. Archiving asks first.
   async function setArchived(key, id, archived) {
-    const list = { goals, bills, budgets, accounts }[key];
+    const list = { goals, bills, budgets, accounts, potential_income: potentialIncome }[key];
     const item = list.find(x => x.id === id);
     if (archived) {
-      const where = { goals: 'Goals', bills: 'Bills', budgets: 'Budgets', accounts: 'Goals' }[key];
+      const where = { goals: 'Goals', bills: 'Bills', budgets: 'Budgets', accounts: 'Goals', potential_income: 'Income' }[key];
       const ok = await askConfirm(`Archive ${item.name}?`,
         `It's hidden from every list and total, but keeps its history. You can restore it from "Archived" at the bottom of the ${where} tab.`,
         'Archive', true);
@@ -1831,6 +1883,7 @@
     renderGoals();
     renderBills();
     renderBudgets();
+    renderIncome();
   }
 
   // Goal cards whose details are open. Kept across renders, not across reloads.
@@ -4384,29 +4437,9 @@
       splitTips = parts.map(tip);
     }
 
-    // ---------- Budget pace ----------
-    // Spending across all budgets against an even spread over the pay period; the tick marks today.
-    const budgetTotal = liveBudgets().reduce((s, b) => s + b.amount, 0);
-    if (budgetTotal > 0) {
-      const periodDays = Math.round((period.nextPayday - period.start) / 86400000);
-      const dayNum = Math.round((today - period.start) / 86400000) + 1;
-      const evenPace = budgetTotal * (dayNum / periodDays);
-      const diff = budgetsSpent - evenPace;
-      const pct = Math.min(100, Math.max(0, (budgetsSpent / budgetTotal) * 100));
-      let note;
-      if (budgetsSpent > budgetTotal) note = `<span style="color: var(--danger)">${formatMoney(budgetsSpent - budgetTotal)} over your budgets.</span>`;
-      else if (diff > Math.max(1, budgetTotal * 0.05)) note = `<span style="color: var(--danger)">${formatMoney(diff)} ahead of an even pace.</span>`;
-      else if (diff < -Math.max(1, budgetTotal * 0.05)) note = `${formatMoney(-diff)} under an even pace.`;
-      else note = 'Right on an even pace.';
-      fold('budgetPace', 'Budget pace', `${formatMoney(budgetsSpent)}<span class="meta">of ${formatMoney(budgetTotal)}</span>`, `
-        <div class="month-head"><span>${formatMoney(budgetsSpent)} spent</span><span class="amt">of ${formatMoney(budgetTotal)}</span></div>
-        <div class="pace">
-          <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-          <div class="pace-mark" style="left: calc(${(dayNum / periodDays) * 100}% - 1px);" title="Today"></div>
-        </div>
-        <div class="bill-due" style="padding: 10px 0 14px;">${note} The tick is today, day ${dayNum} of ${periodDays}.</div>
-      `);
-    }
+    // Budget pace card removed from the Overview (13 Nov 2026) — Budgets isn't in the nav any more, replaced
+    // by Potential income. `renderBudgets`, the Budgets sheet and `budgetsView` are still there, just
+    // unreachable, in case budgets come back later.
 
     // ---------- Coming up in this period ----------
     // Shared with the widget (LedgerCore.ledger().comingUp).
@@ -5377,6 +5410,138 @@
   document.getElementById('closeSpendHistory').addEventListener('click', () => spendHistoryOverlay.classList.remove('open'));
   spendHistoryOverlay.addEventListener('click', (e) => { if (e.target === spendHistoryOverlay) spendHistoryOverlay.classList.remove('open'); });
 
+  // ---------- Potential income render ----------
+  // A plain reference list — name, amount, expected date — for income that isn't confirmed yet. Not counted
+  // in any pay period total; see fromIncomeRow and the "Mapping" section for why it isn't in ledger-core.js.
+  // The table (migration 010) is optional, same pattern as accounts/bill history.
+  function renderIncome() {
+    const list = document.getElementById('incomeList');
+    const totalsEl = document.getElementById('incomeTotals');
+    const addBtn = document.getElementById('openAddPotentialIncome');
+    if (!incomeReady) {
+      list.innerHTML = '';
+      totalsEl.style.display = 'none';
+      addBtn.style.display = 'none';
+      document.getElementById('incomeArchive').innerHTML = '';
+      return;
+    }
+    addBtn.style.display = 'block';
+    const live = potentialIncome.filter(i => !i.archived).sort((x, y) => x.expectedDate < y.expectedDate ? -1 : 1);
+    const dayMonthYear = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+    renderArchive('incomeArchive', 'potential_income', potentialIncome.filter(i => i.archived).map(i => ({
+      id: i.id, name: i.name, meta: dayMonthYear(parseLocalDate(i.expectedDate)), amount: formatMoney(i.amount)
+    })), 'potential income');
+
+    if (live.length === 0) {
+      list.innerHTML = `<div class="empty"><div class="big">Nothing listed</div>Tap "New potential income" for income you might get — some freelance work, a bonus, anything you're not counting on yet.</div>`;
+      totalsEl.style.display = 'none';
+      return;
+    }
+
+    const total = live.reduce((s, i) => s + i.amount, 0);
+    totalsEl.style.display = 'flex';
+    totalsEl.innerHTML = `
+      <div class="item">
+        <div class="num">${formatMoney(total)}</div>
+        <div class="lbl">across ${live.length} ${live.length === 1 ? 'entry' : 'entries'}</div>
+      </div>
+    `;
+
+    const today = startOfToday();
+    list.innerHTML = live.map(i => {
+      const d = parseLocalDate(i.expectedDate);
+      const overdue = d < today;
+      return `
+        <div class="goal ${overdue ? 'overdue' : ''}">
+          <div class="goal-head">
+            <div class="goal-name">${escapeHtml(i.name)}</div>
+            <div class="goal-head-actions">
+              <button class="btn-icon edit-income" data-id="${i.id}">edit</button>
+            </div>
+          </div>
+          <div class="bill-foot">
+            <div class="bill-due">Expected ${dayMonthYear(d)}${overdue ? ' · passed' : ''}</div>
+            <div class="bill-amount">${formatMoney(i.amount)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    list.querySelectorAll('.edit-income').forEach(btn => btn.addEventListener('click', () => openIncomeSheet(btn.dataset.id)));
+  }
+
+  // ---------- Potential income sheet ----------
+  const incomeOverlay = document.getElementById('incomeOverlay');
+  const incomeNameInput = document.getElementById('incomeNameInput');
+  const incomeAmountInput = document.getElementById('incomeAmountInput');
+  const incomeDateInput = document.getElementById('incomeDateInput');
+
+  function openIncomeSheet(id) {
+    editingIncomeId = id || null;
+    const i = id ? potentialIncome.find(x => x.id === id) : null;
+    document.getElementById('incomeSheetTitle').textContent = i ? 'Edit potential income' : 'New potential income';
+    incomeNameInput.value = i ? i.name : '';
+    incomeAmountInput.value = i ? i.amount : '';
+    incomeDateInput.value = i ? i.expectedDate : '';
+    document.getElementById('deleteIncomeRow').style.display = i ? 'flex' : 'none';
+    incomeOverlay.classList.add('open');
+    setTimeout(() => incomeNameInput.focus(), 100);
+  }
+
+  function closeIncomeSheet() {
+    incomeOverlay.classList.remove('open');
+    editingIncomeId = null;
+  }
+
+  document.getElementById('openAddPotentialIncome').addEventListener('click', () => openIncomeSheet(null));
+  document.getElementById('cancelIncome').addEventListener('click', closeIncomeSheet);
+  incomeOverlay.addEventListener('click', (e) => { if (e.target === incomeOverlay) closeIncomeSheet(); });
+
+  document.getElementById('saveIncome').addEventListener('click', async () => {
+    const name = incomeNameInput.value.trim();
+    const amount = parseFloat(incomeAmountInput.value);
+    const expectedDate = incomeDateInput.value;
+    if (!name) { showToast('Give it a name'); return; }
+    if (!(amount > 0)) { showToast('Enter an amount'); return; }
+    if (!expectedDate || hasBadDate(incomeDateInput)) { showToast('Enter an expected date'); return; }
+    const saveBtn = document.getElementById('saveIncome');
+    saveBtn.disabled = true;
+    try {
+      if (editingIncomeId) {
+        await saveRow('potential_income', editingIncomeId, { name, amount, expected_date: expectedDate });
+        Object.assign(potentialIncome.find(x => x.id === editingIncomeId), { name, amount, expectedDate });
+      } else {
+        potentialIncome.push(fromIncomeRow(await saveRow('potential_income', null, { name, amount, expected_date: expectedDate })));
+      }
+      render();
+      closeIncomeSheet();
+    } catch (e) {
+      showToast("Couldn't save — check your connection");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  document.getElementById('archiveIncome').addEventListener('click', async () => {
+    if (editingIncomeId && await setArchived('potential_income', editingIncomeId, true)) closeIncomeSheet();
+  });
+
+  document.getElementById('deleteIncome').addEventListener('click', async () => {
+    if (!editingIncomeId) return;
+    const idToDelete = editingIncomeId;
+    const i = potentialIncome.find(x => x.id === idToDelete);
+    if (!(await askConfirm(`Delete ${i.name}?`, "This can't be undone.", 'Delete', true))) return;
+    try {
+      await deleteRow('potential_income', idToDelete);
+      potentialIncome = potentialIncome.filter(x => x.id !== idToDelete);
+      render();
+      closeIncomeSheet();
+    } catch (e) {
+      showToast("Couldn't delete — check your connection");
+    }
+  });
+
   // ---------- Charts ----------
   // Small inline-SVG charts drawn at their container's real width, redrawn when it changes size
   // (including when a hidden tab is first shown). Hover or tap a mark for its tooltip.
@@ -5568,7 +5733,7 @@
   }
 
   // ---------- Navigation ----------
-  const VIEWS = ['overview', 'goals', 'bills', 'budgets'];
+  const VIEWS = ['overview', 'goals', 'bills', 'income'];
 
   function showView() {
     const hashView = location.hash.slice(1);
@@ -5767,6 +5932,8 @@
     accountsReady = false;
     billAmountHistory = [];
     billHistoryReady = false;
+    potentialIncome = [];
+    incomeReady = false;
     recapCard = undefined;
     recapDismissed = false;
     loadedAt = 0;

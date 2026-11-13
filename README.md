@@ -9,7 +9,7 @@ Live at <https://deltabellwebapps.github.io/savings-tracker/>.
 
 | Path | What it is |
 |---|---|
-| `index.html` | The whole web app: markup, styles and script. Four tabs: Overview, Goals, Bills, Budgets. |
+| `index.html` | The whole web app: markup, styles and script. Four tabs: Overview, Goals, Bills, Income. |
 | `ledger-core.js` | The app's core rules: dates, bill schedules, pay periods, the yearly bills pot, money formatting, goal plans and projections, savings account balances, interest and allowances. The app needs it to load. |
 | `supabase/` | SQL migrations, run by hand in the Supabase SQL editor. |
 | `widget/` | iPhone widgets and a quick spend script for [Scriptable](https://scriptable.app). See "Phone widgets" below. |
@@ -72,9 +72,9 @@ There's no build step. GitHub Pages serves the files as they are.
   Money not given to a goal stays *unassigned*. "+ Add" and "Pay out" on a goal, "Assign" and "Done" on an
   account all open it filled in. The rules for what it records are in the comment above `openMoveSheet()` in
   `index.html`.
-- **Savings accounts** (regular saver, cash ISA, other) are on the Goals tab behind its Goals / Accounts switch
-  (remembered on the device; Accounts gets a red dot when something there needs a look), with what each
-  goal holds in them and what's unassigned. "edit" on a goal's line sets how much of the account is that goal's,
+- **Savings accounts** (regular saver, cash ISA, other) are their own card on the Overview (it gets a red dot
+  on its title when something there needs a look), with what each goal holds in them and what's unassigned.
+  "edit" on a goal's line sets how much of the account is that goal's,
   with a date, or removes it: the difference comes from or goes back to unassigned (one goal entry, nothing moves
   between accounts). Balances are entered by hand now and then; any change beyond the transfers in between
   counts as interest. Also per account:
@@ -90,22 +90,37 @@ There's no build step. GitHub Pages serves the files as they are.
   account, money from outside your income and moves between accounts count towards the goal but not this month's
   plan, like cashback. An entry dated before payday belongs to the previous period; goal entries' dates can be
   changed from the goal's History. The rule is `fromIncome` in `ledger-core.js`.
-- **Budgets** are monthly allowances (e.g. Groceries £300). They reset each payday, and spends are logged against them.
-  The Budgets tab charts spending per pay period over the last six (all budgets, or one you tap), and each
+- **Budgets** are monthly allowances (e.g. Groceries £300). They reset each payday, and spends are logged against
+  them. The Budgets tab charts spending per pay period over the last six (all budgets, or one you tap), and each
   budget's average over the finished ones against its allowance. Past periods use today's allowances.
-- **Overview.** From the top: *free to spend each day* in large type, with the days to payday and a bar of where
-  this period's income goes; **Needs you** (overdue bills, standing orders and goal payments, pay not entered, a
-  bank balance missing or from before payday); Coming up; Budget pace; then Bank balance, Savings and Pay period
-  as closed sections showing their key figure, opened with a tap.
+  **Not reachable from the nav as of 13 Nov 2026** — the Income tab took its slot, since budgets weren't being
+  used. The code, the sheet and any budgets already made are all still there, just not linked to from
+  anywhere; `budgetsView` in `index.html` and the Overview's `fold('budgetPace', ...)` (removed, not just
+  hidden) are the two places to restore if budgets come back.
+- **Potential income** is a plain reference list on the Income tab — a name, an amount and the date you expect
+  it — for income you're not counting on yet (some freelance work, a bonus). It's never counted in any pay
+  period total, Coming up, or the "where the money goes" split; it's just a list with its own total. Needs
+  migration 010 (`potential_income`); see `renderIncome()` in `index.html`.
+- **Overview.** From the top: an alert banner if the balance forecast would go overdrawn; a dismissible recap
+  of the pay period that just finished (see below); **Needs you** (overdue bills, standing orders and goal
+  payments, pay not entered, a bank balance missing or from before payday); a "This pay period" card with the
+  days to payday and a bar of where this period's income goes; then the cards — Coming up, Bank balance,
+  Savings accounts and Pay period — each its own card, draggable by its handle (or focus it and use the arrow
+  keys) into any order, and individually collapsible to its key figure. Order (`ledger.overviewOrder`) and
+  open/closed state (`ledger.overviewOpen`) are remembered per device, not synced.
   Pay + other income − bills − the yearly bills pot = *left over*. Then subtract savings and budgets
-  (each one's plan, or more if you've gone over it) to get *free to spend*. Savings are one row per account:
-  what's been moved in this period, plus the standing order still to go, plus whatever its goals still want
-  beyond that. Money that was already in the account only counts towards a goal once it's assigned. Goals with
-  no account (and straight-out goals paid from the current account) are one "Goals" row.
-  The Savings card lists each account's balance, how much of it is for goals and how much is unassigned.
+  (each one's plan, or more if you've gone over it) to get what's left for the period, shown as "Free to
+  spend" at the bottom of the Pay period card (a one-off total, not the daily figure the app used to show —
+  that's been removed, since it needed the bank balance kept up to date by hand). Savings are one row per
+  account: what's been moved in this period, plus the standing order still to go, plus whatever its goals still
+  want beyond that. Money that was already in the account only counts towards a goal once it's assigned. Goals
+  with no account (and straight-out goals paid from the current account) are one "Goals" row.
+  The Savings accounts card is the full account-management view (balances, ISA allowance, standing orders,
+  add/edit/history/move) — not just a summary. The "Total" figure (current account plus savings) is on the
+  Bank balance card.
   The charts and past pay are in a History section at the bottom, closed to start with — including, once there's
   a savings account, a combined "Net worth over time" chart (current account plus savings, the history behind
-  the "Total" figure on the Savings card).
+  that Total figure).
   - The first time the Overview loads after a new pay period has started, it shows a dismissible **recap** of
     the one that just finished: left over, net money saved towards goals, any budget that went over, and any
     bill price change recorded during it. It's worked out straight from the records (not the plan-vs-actual
@@ -123,8 +138,9 @@ There's no build step. GitHub Pages serves the files as they are.
   A projected overdraft also gets a banner right at the top of the Overview, above everything else, so it
   doesn't depend on scrolling down to the balance statement to notice.
   The rules are in `balanceOutlook()` in `index.html` and `balanceForecast()` in `ledger-core.js`.
-- **Archiving** hides a goal, bill, income source or budget from every list, total and chart without
-  deleting its history. You can restore it from the "Archived" list at the bottom of its tab.
+- **Archiving** hides a goal, bill, income source, budget or potential income entry from every list, total and
+  chart without deleting its history. You can restore it from the "Archived" list at the bottom of its tab
+  (or, for savings accounts, its card on the Overview).
 
 ## Supabase setup
 
@@ -146,6 +162,7 @@ Row-level security limits each user to their own rows.
 | `accounts` | `name`, `kind` (`saver` / `isa` / `other`), `standing_amount`, `standing_start`, `monthly_limit`, `matures_on`, `flexible`, `isa_paid_before`, `isa_paid_before_year`, `sort_order`, `archived` | Added in migration 003 (`isa_paid_*` in 004). Savings accounts; the current account isn't one. `isa_paid_before` is ISA money paid in before the account was added, counted only in the tax year `isa_paid_before_year` starts. |
 | `account_balances` | `account_id`, `amount` | Added in migration 003. Savings account balances as entered. |
 | `transfers` | `account_id`, `amount`, `moved_on`, `note`, `deposit_id`, `due_date`, `external` | Added in migration 003 (`external` in 005). Positive = into savings. `due_date` marks a standing order occurrence; `external` = the other side isn't the current account (paid in from outside, paid out, or another savings account), so it doesn't move the current account. `deposit_id` is the old link to a goal entry, replaced by `deposits.transfer_id` in migration 006. |
+| `potential_income` | `name`, `amount`, `expected_date`, `archived` | Added in migration 010. Speculative income (not confirmed, not counted in any total) — just a list with its own total. Budgets/spends are still there but not reachable from the nav; this took their tab. |
 
 Migration 003 also adds `goals.account_id`, the account a goal's money is kept in.
 
@@ -182,6 +199,8 @@ Deploy the matching app code only *after* running the migration.
 - `008_goal_reset_allowance.sql` adds `goals.reset_frequency` and `goals.reset_start`, for a periodic-reset goal.
 - `009_bill_amount_history.sql` creates `bill_amount_history`. Until it's run the app works as before, with no
   "was £X until DATE" note on a bill that's had its amount changed.
+- `010_potential_income.sql` creates `potential_income`, for the Income tab (13 Nov 2026 release — it replaced
+  Budgets in the nav). Until it's run the tab is empty with nothing to add; nothing else depends on it.
 
 The SQL files for 001–006 were lost. Only 001 survives, in the GitHub history (deleted on 4 Oct 2026). For a
 record of the schema they built, see the export from 9 Nov 2026 in `supabase/`:
